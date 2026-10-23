@@ -33,7 +33,7 @@ COPY backend/package*.json ./backend/
 RUN npm ci --omit=dev
 RUN cd backend && npm ci --omit=dev
 
-COPY --from=builder /app/dist ./dist
+COPY --from=builder /app/backend/dist ./backend/dist
 COPY --from=builder /app/db ./db
 
 # Create uploads directory and set permissions for non-root node user
@@ -43,4 +43,4 @@ USER node
 
 EXPOSE 4000
 
-CMD ["sh", "-c", "node --loader tsx db/migrate.ts && node dist/backend/src/server.js"]
+CMD ["sh", "-c", "node backend/dist/db/migrate.js && node backend/dist/backend/src/server.js"]

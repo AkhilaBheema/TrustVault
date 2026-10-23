@@ -28,7 +28,15 @@ export async function runMigrations(customPool?: pg.Pool) {
     `);
 
     // 2. Read all migration files
-    const migrationsDir = path.join(__dirname, 'migrations');
+    const migrationsDir = [
+      path.join(__dirname, 'migrations'),
+      path.resolve(__dirname, '../../../db/migrations'),
+      path.resolve(process.cwd(), 'db/migrations'),
+    ].find((candidate) => fs.existsSync(candidate));
+
+    if (!migrationsDir) {
+      throw new Error('Could not locate the TrustVault db/migrations directory.');
+    }
     const files = fs.readdirSync(migrationsDir)
       .filter((file) => file.endsWith('.sql'))
       .sort();

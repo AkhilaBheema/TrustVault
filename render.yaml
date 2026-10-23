@@ -2,8 +2,10 @@ services:
   - type: web
     name: trustvault-api
     runtime: node
+    plan: 0.5c-512mb
     buildCommand: npm ci && npm --prefix backend ci && npm run backend:build
-    startCommand: npm run db:migrate && npm run backend:start
+    startCommand: node backend/dist/db/migrate.js && npm run backend:start
+    initialDeployHook: npm run db:seed
     healthCheckPath: /api/health
     envVars:
       - key: NODE_ENV
@@ -17,11 +19,11 @@ services:
       - key: CORS_ORIGIN
         sync: false
       - key: COOKIE_SAME_SITE
-        value: none
+        value: strict
       - key: MASTER_KEY
         sync: false
       - key: SESSION_SECRET
-        sync: false
+        generateValue: true
       - key: STORAGE_DIR
         value: /var/data/uploads
     disk:
@@ -31,5 +33,6 @@ services:
 
 databases:
   - name: trustvault-db
+    plan: 0.1c-256mb
     databaseName: trustvault
     user: trustvault

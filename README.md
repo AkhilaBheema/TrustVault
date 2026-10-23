@@ -5,7 +5,7 @@ Zero-trust document sharing. The wrong person never reaches a file. Every access
 ## Quick Start (from clean clone)
 
 ```bash
-git clone <repo>
+git clone https://github.com/AkhilaBheema/TrustVault.git
 cd trustvault
 cp .env.example .env          # edit secrets if needed
 docker-compose up -d          # starts postgres + backend + frontend
@@ -62,21 +62,27 @@ npm test                      # vitest — uses PGlite in-memory DB, no real PG 
 ## Deploy to Vercel + Render
 
 The repository includes [`vercel.json`](./vercel.json) and [`render.yaml`](./render.yaml)
-for a split deployment:
+for a split deployment. Keep Vercel's project root at the repository root.
 
-1. **Render API:** create a Blueprint from the repository. It provisions the
-   PostgreSQL database and `trustvault-api` service, runs migrations on startup,
-   and stores encrypted uploads on a persistent disk.
-2. Set the Render `MASTER_KEY` to a new 64-character hexadecimal value and
-   `SESSION_SECRET` to a random value of at least 32 characters. Set
-   `CORS_ORIGIN` to the final Vercel URL, for example
-   `https://trustvault.vercel.app`.
-3. **Vercel frontend:** import the same repository. Vercel uses `vercel.json`
-   to build `frontend` and serve its static output. Set
-   `VITE_API_URL` to the Render API origin followed by `/api`, for example
-   `https://trustvault-api.onrender.com/api`.
-4. Because the frontend and API have different origins, Render uses
-   `COOKIE_SAME_SITE=none` and HTTPS is required for login cookies to work.
+1. **Render API:** create a Blueprint from this repository. It provisions a
+   PostgreSQL database and the `trustvault-api` web service, applies migrations,
+   seeds the demo workspace on its first successful deploy, and stores encrypted
+   uploads on a persistent disk.
+2. Set `MASTER_KEY` in the Render dashboard to a private, randomly generated
+   64-character hexadecimal value. Set `CORS_ORIGIN` to the production Vercel
+   origin, such as `https://trustvault.vercel.app`. Render generates
+   `SESSION_SECRET` for the service.
+3. **Vercel frontend:** import the same repository and deploy from its root.
+   `vercel.json` installs and builds `frontend`, then proxies `/api/*` through
+   Vercel to `https://trustvault-api.onrender.com/api/*`. If the Render service
+   gets a different URL, update that destination in `vercel.json`.
+4. Leave `VITE_API_URL` unset in Vercel. The frontend uses the same-origin
+   `/api` route, so secure `SameSite=Strict` session cookies work without
+   exposing the Render API as a separate browser origin.
+
+The Render Blueprint uses paid small web and PostgreSQL plans so encrypted
+uploads and database records persist. Review those plans before creating the
+services in Render.
 
 For a same-origin local setup, leave `VITE_API_URL` unset and use the default
 `COOKIE_SAME_SITE=strict` from `.env.example`.

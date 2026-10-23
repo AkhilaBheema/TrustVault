@@ -1847,6 +1847,11 @@ export default function App() {
   }, [theme]);
 
   useEffect(() => {
+    document.title = 'TrustVault — Trust, built into every file';
+    document.querySelector('meta[name="apple-mobile-web-app-capable"]')?.remove();
+  }, []);
+
+  useEffect(() => {
     const syncPage = () => setPublicPage(window.location.hash === '#/signup' ? 'signup' : window.location.hash === '#/login' ? 'login' : 'home');
     window.addEventListener('hashchange', syncPage);
     window.addEventListener('popstate', syncPage);

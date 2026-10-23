@@ -28,7 +28,7 @@ async function request<T>(
 ): Promise<T> {
   const headers: Record<string, string> = {};
 
-  if (!isMultipart) {
+  if (!isMultipart && body !== undefined) {
     headers['Content-Type'] = 'application/json';
   }
 

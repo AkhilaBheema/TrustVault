@@ -1,12 +1,16 @@
 {
   "version": 2,
   "framework": "vite",
-  "installCommand": "npm ci",
-  "buildCommand": "npm --prefix frontend ci && npm --prefix frontend run build",
+  "installCommand": "npm --prefix frontend ci",
+  "buildCommand": "npm --prefix frontend run build",
   "outputDirectory": "frontend/dist",
   "rewrites": [
     {
-      "source": "/((?!assets/).*)",
+      "source": "/api/:path*",
+      "destination": "https://trustvault-api.onrender.com/api/:path*"
+    },
+    {
+      "source": "/(.*)",
       "destination": "/index.html"
     }
   ]

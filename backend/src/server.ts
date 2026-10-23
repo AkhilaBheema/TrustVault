@@ -64,13 +64,19 @@ async function ensureDatabase() {
     setDatabasePool(pglitePool);
 
     // Apply migrations
-    const migrationsDir = path.resolve(__dirname, '../../db/migrations');
-    if (fs.existsSync(migrationsDir)) {
-      const files = fs.readdirSync(migrationsDir).filter(f => f.endsWith('.sql')).sort();
-      for (const file of files) {
-        const sql = fs.readFileSync(path.join(migrationsDir, file), 'utf8');
-        await db.exec(sql);
-      }
+    const migrationsDir = [
+      path.resolve(__dirname, '../../db/migrations'),
+      path.resolve(__dirname, '../../../db/migrations'),
+      path.resolve(__dirname, '../../../../db/migrations'),
+      path.resolve(process.cwd(), 'db/migrations'),
+    ].find((candidate) => fs.existsSync(candidate));
+    if (!migrationsDir) {
+      throw new Error('Could not locate the TrustVault db/migrations directory.');
+    }
+    const files = fs.readdirSync(migrationsDir).filter(f => f.endsWith('.sql')).sort();
+    for (const file of files) {
+      const sql = fs.readFileSync(path.join(migrationsDir, file), 'utf8');
+      await db.exec(sql);
     }
 
     // Seed default accounts and documents

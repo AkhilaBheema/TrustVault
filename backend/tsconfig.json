@@ -4,7 +4,7 @@
     "module": "NodeNext",
     "moduleResolution": "NodeNext",
     "lib": ["ES2022"],
-    "outDir": "../dist",
+    "outDir": "./dist",
     "rootDir": "..",
     "strict": true,
     "esModuleInterop": true,
@@ -20,6 +20,6 @@
     "noImplicitReturns": true,
     "noFallthroughCasesInSwitch": true
   },
-  "include": ["src/**/*", "../db/seed.ts"],
+  "include": ["src/**/*", "../db/**/*.ts"],
   "exclude": ["node_modules", "dist", "**/*.test.ts"]
 }

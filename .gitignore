@@ -6,5 +6,7 @@ build
 coverage
 uploads/*
 !uploads/.gitkeep
+/backend/uploads/*
+!/backend/uploads/.gitkeep
 .DS_Store
 *.local

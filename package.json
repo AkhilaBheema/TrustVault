@@ -9,7 +9,7 @@
     "db:seed": "tsx db/seed.ts",
     "backend:dev": "npm --prefix backend run dev",
     "backend:build": "npm --prefix backend run build",
-    "backend:start": "node dist/backend/src/server.js",
+    "backend:start": "node backend/dist/backend/src/server.js",
     "backend:test": "npm --prefix backend test",
     "frontend:dev": "npm --prefix frontend run dev",
     "frontend:build": "npm --prefix frontend run build",
