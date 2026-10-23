@@ -32,15 +32,34 @@ services:
       DATABASE_URL: postgresql://trustvault:trustvault_secret@db:5432/trustvault
       PORT: 4000
       NODE_ENV: production
-      MASTER_KEY: 0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
-      SESSION_SECRET: super_secret_session_signing_key_at_least_32_bytes_long_123456
+      MASTER_KEY: ${MASTER_KEY:?Set MASTER_KEY in .env}
+      SESSION_SECRET: ${SESSION_SECRET:?Set SESSION_SECRET in .env}
       CORS_ORIGIN: http://localhost:5173
       STORAGE_DIR: /app/uploads
+      ORGANIZATION_NAME: ${ORGANIZATION_NAME:-Workspace}
+      INITIAL_ADMIN_EMAIL: ${INITIAL_ADMIN_EMAIL:?Set INITIAL_ADMIN_EMAIL in .env}
+      INITIAL_ADMIN_NAME: ${INITIAL_ADMIN_NAME:?Set INITIAL_ADMIN_NAME in .env}
+      INITIAL_ADMIN_PASSWORD: ${INITIAL_ADMIN_PASSWORD:?Set INITIAL_ADMIN_PASSWORD in .env}
     ports:
       - "4000:4000"
     volumes:
       - uploads_data:/app/uploads
 
+  frontend:
+    image: node:22-alpine
+    working_dir: /app/frontend
+    command: sh -c "npm ci && npm run dev -- --host 0.0.0.0"
+    environment:
+      VITE_PROXY_TARGET: http://backend:4000
+    depends_on:
+      - backend
+    ports:
+      - "5173:5173"
+    volumes:
+      - ./frontend:/app/frontend
+      - frontend_node_modules:/app/frontend/node_modules
+
 volumes:
   pgdata:
   uploads_data:
+  frontend_node_modules:

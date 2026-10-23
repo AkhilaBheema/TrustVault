@@ -1,13 +1,13 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import dotenv from 'dotenv';
 import { PGlite } from '@electric-sql/pglite';
+import { loadEnvironment } from './config/env.js';
 import { buildApp } from './app.js';
 import { pool, setDatabasePool, DatabasePool, DatabaseClient } from './db/index.js';
 import { runSeed } from '../../db/seed.js';
 
-dotenv.config();
+loadEnvironment();
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -57,6 +57,7 @@ async function ensureDatabase() {
     );
     await Promise.race([testPromise, timeoutPromise]);
     console.log('[DATABASE] Connected to external PostgreSQL database.');
+    await runSeed(pool);
   } catch {
     console.log('[DATABASE] External PostgreSQL not reachable. Booting embedded PostgreSQL (PGlite)...');
     const db = new PGlite();
@@ -79,9 +80,9 @@ async function ensureDatabase() {
       await db.exec(sql);
     }
 
-    // Seed default accounts and documents
+    // Provision the first configured administrator; never create sample content.
     await runSeed(pglitePool);
-    console.log('[DATABASE] Embedded database initialized & seeded successfully.');
+    console.log('[DATABASE] Embedded database initialized.');
   }
 }
 

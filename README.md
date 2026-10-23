@@ -1,127 +1,56 @@
 # TrustVault
 
-Zero-trust document sharing. The wrong person never reaches a file. Every access is provable.
+TrustVault is a role-based document workspace with encrypted storage, explicit access grants, expiring share invitations, access request workflows, and an append-only audit trail.
 
-## Quick Start (from clean clone)
+## Local setup
 
-```bash
-git clone https://github.com/AkhilaBheema/TrustVault.git
-cd trustvault
-cp .env.example .env          # edit secrets if needed
-docker-compose up -d          # starts postgres + backend + frontend
-npm run db:seed               # loads the demo workspaces and sample activity
-```
+1. Copy `.env.example` to `.env`. Set a 64-character hex `MASTER_KEY`, a private `SESSION_SECRET`, and the initial administrator's organization, email, name, and password. The password must be at least 12 characters.
+2. Start the local stack with `docker compose up --build`.
+3. Open [http://localhost:5173](http://localhost:5173) and sign in with the administrator account from `.env`.
 
-Open http://localhost:5173
+The backend applies database migrations at startup and provisions the configured administrator only when the database has no users. Existing workspaces are left intact. To provision the first account manually against `DATABASE_URL`, run `npm run db:seed` from the repository root.
 
-## Seed Credentials
+For a manual setup, start PostgreSQL, install dependencies with `npm ci`, `npm --prefix backend ci`, and `npm --prefix frontend ci`, then run `npm run db:migrate`, `npm run db:seed`, `npm run backend:dev`, and `npm run frontend:dev` in separate terminals. The Vite server proxies `/api` to `http://localhost:4000`.
 
-| Role   | Email                | Password           |
-|--------|---------------------|--------------------|
-| Admin  | admin@acme.com      | TrustVault2026!#   |
-| Owner  | owner@acme.com      | TrustVault2026!#   |
-| Viewer | viewer@acme.com     | TrustVault2026!#   |
-| Admin  | admin@stark.com     | TrustVault2026!#   |
-| Owner  | owner@stark.com     | TrustVault2026!#   |
-| Viewer | viewer@stark.com    | TrustVault2026!#   |
+## Role workflows
 
-Two isolated orgs (Acme Corp, Stark Industries) to test cross-tenant isolation.
+- **Administrator:** manage workspace accounts, review account activity and security signals, and verify or export the audit chain. Administrators do not gain document access by role.
+- **Owner:** upload documents and versions, issue and revoke grants, create recipient-bound expiring invitation links, review access requests, and inspect permission suggestions.
+- **Viewer:** browse documents explicitly shared with them, download through short-lived tickets, submit access requests, and track each request's status.
 
-The Acme preview includes six encrypted sample documents, three documents shared
-with the viewer, one private roadmap with a pending access request, and a
-hash-chained sample audit trail. The viewer can open the financial strategy,
-employee directory, and time-limited board brief; the roadmap remains denied
-until the owner reviews the request. Stark has a separate three-document demo.
+## Validation
 
-## Manual Setup (no Docker)
+Automated backend tests use isolated in-memory databases and fixtures under `backend/tests/helpers/`. The production seed creates only the configured first administrator; it does not add sample accounts, files, grants, or activity.
 
 ```bash
-# 1. PostgreSQL
-createdb trustvault
-psql trustvault < db/migrations/001_initial_schema.sql
-psql trustvault < db/migrations/002_audit_immutability.sql
-npm run db:seed               # creates demo accounts, encrypted documents, grants, and preview activity
-
-# 2. Backend
-cd backend && npm install
-cp ../.env.example ../.env    # edit DATABASE_URL, MASTER_KEY, SESSION_SECRET
-npm run dev                   # port 4000
-
-# 3. Frontend
-cd ../frontend && npm install
-npm run dev                   # port 5173
+npm run backend:test
+npm run frontend:build
+npm run backend:build
 ```
 
-## Run Tests
+## Deployment
 
-```bash
-cd backend
-npm test                      # vitest — uses PGlite in-memory DB, no real PG needed
-```
+The repository includes [`vercel.json`](./vercel.json) and [`render.yaml`](./render.yaml) for a split Vercel and Render deployment.
 
-## Deploy to Vercel + Render
+1. Create the Render Blueprint and set `MASTER_KEY`, `CORS_ORIGIN`, `INITIAL_ADMIN_EMAIL`, `INITIAL_ADMIN_NAME`, and `INITIAL_ADMIN_PASSWORD` in the service settings. Use a unique 64-character hex master key and a strong initial password.
+2. Render provisions PostgreSQL, runs migrations, and provisions the administrator when the database is empty.
+3. Deploy the frontend on Vercel with the repository root as its project root. Keep `VITE_API_URL` unset so `/api/*` uses the same-origin proxy configured in `vercel.json`.
 
-The repository includes [`vercel.json`](./vercel.json) and [`render.yaml`](./render.yaml)
-for a split deployment. Keep Vercel's project root at the repository root.
+## Security model
 
-1. **Render API:** create a Blueprint from this repository. It provisions a
-   PostgreSQL database and the `trustvault-api` web service, applies migrations,
-   seeds the demo workspace on its first successful deploy, and stores encrypted
-   uploads on a persistent disk.
-2. Set `MASTER_KEY` in the Render dashboard to a private, randomly generated
-   64-character hexadecimal value. Set `CORS_ORIGIN` to the production Vercel
-   origin, such as `https://trustvault.vercel.app`. Render generates
-   `SESSION_SECRET` for the service.
-3. **Vercel frontend:** import the same repository and deploy from its root.
-   `vercel.json` installs and builds `frontend`, then proxies `/api/*` through
-   Vercel to `https://trustvault-api.onrender.com/api/*`. If the Render service
-   gets a different URL, update that destination in `vercel.json`.
-4. Leave `VITE_API_URL` unset in Vercel. The frontend uses the same-origin
-   `/api` route, so secure `SameSite=Strict` session cookies work without
-   exposing the Render API as a separate browser origin.
+- Every document operation passes through a default-deny authorization service.
+- Document queries and administrative activity are scoped to the user's organization.
+- Downloads use single-use, short-lived tickets and recheck authorization when streamed.
+- Files use AES-256-GCM encryption with per-file data keys.
+- Audit events form a SHA-256 chain; database triggers block mutation of recorded events.
 
-The Render Blueprint uses paid small web and PostgreSQL plans so encrypted
-uploads and database records persist. Review those plans before creating the
-services in Render.
+## Project structure
 
-For a same-origin local setup, leave `VITE_API_URL` unset and use the default
-`COOKIE_SAME_SITE=strict` from `.env.example`.
-
-## Stack Rationale
-
-| Choice | Why |
-|--------|-----|
-| Fastify | 3× faster than Express, schema-first validation hooks |
-| PostgreSQL | ACID transactions for grant/session atomicity; advisory locks for hash chain |
-| Server-side sessions | Revocation = one DELETE row; no JWT clock-skew problem |
-| AES-256-GCM | Authenticated encryption; per-file DEK wrapped by env master key |
-| Argon2id | Memory-hard; OWASP recommended for passwords |
-| PGlite tests | In-memory PG-compatible engine; no test DB setup needed |
-
-## Security Architecture
-
-- **Single `authorize()` chokepoint** — `backend/src/services/authorization.service.ts`
-- **Default deny** — every route that touches a document calls `authorize()` first
-- **Same 404** for deny and nonexistent — no existence leaks
-- **Audit chain** — SHA-256 hash chain; DB triggers block UPDATE/DELETE/TRUNCATE
-- **Immediate revocation** — delete session/grant row; next request fails
-- **Download tickets** — single-use, ≤60s, re-authorized at stream time
-
-## Project Structure
-
-```
-trustvault/
-├── backend/src/
-│   ├── services/authorization.service.ts   ← THE chokepoint
-│   ├── services/audit.service.ts           ← hash chain
-│   ├── routes/                             ← all HTTP routes
-│   ├── middleware/auth.ts                  ← authenticate, requireRole, verifyCsrf
-│   └── repositories/document.repository.ts ← SQL-scoped list queries
-├── frontend/src/
-│   ├── App.tsx                             ← all UI views
-│   └── api.ts                             ← API client with CSRF
-├── db/
-│   ├── migrations/                         ← plain SQL migrations
-│   └── seed.ts                            ← seed data
-└── docs/                                   ← ROLES.md, PERMISSION_MODEL.md, etc.
+```text
+backend/src/       Fastify API, authorization, and persistence services
+backend/tests/     API tests and isolated test fixtures
+frontend/src/      React application and API client
+db/migrations/    Database schema migrations
+db/seed.ts         Configured first-administrator provisioning
+docs/              Permission and security documentation
 ```

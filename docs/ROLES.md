@@ -9,10 +9,10 @@ TrustVault enforces a strict, zero-trust security model founded on the principle
 ### 1.1 Admin
 * **Purpose**: System administration, user lifecycle management, session control, and audit compliance.
 * **Capabilities**:
-  * Create, update, disable, and unlock users within their organization.
+  * Create users and disable, enable, or unlock accounts within their organization.
   * Terminate active sessions (force-logout) for compromised or departed accounts.
-  * View system-wide metadata: user rosters, permission lists, access request statuses, and alert dashboards.
-  * Inspect tamper-evident audit logs and execute the cryptographic hash-chain verification endpoint.
+  * Review user status and session counts, security alerts, and each user's recorded activity.
+  * Filter and export the organization-scoped tamper-evident audit log, including access-request events, and verify its hash chain.
 * **Security Restriction (Separation of Duties)**:
   * **An Administrator CANNOT automatically view, download, preview, or edit document contents.**
   * *Justification*: In enterprise and security-critical settings, IT administrators manage infrastructure, accounts, and compliance. Conflating system administration with document content access violates confidentiality and creates a massive insider-threat vector. If an admin requires access to a sensitive document (e.g., quarterly financials or legal IP), they must be explicitly granted access by the document's owner like any other actor, and that grant is permanently recorded in the immutable audit trail.
@@ -21,23 +21,25 @@ TrustVault enforces a strict, zero-trust security model founded on the principle
 * **Purpose**: Full lifecycle ownership of their uploaded documents.
 * **Capabilities**:
   * Upload new documents and upload subsequent versions.
-  * Organize document metadata (title, description, category).
-  * Issue, modify, and revoke per-document grants (`read`, `edit`) to other users in the organization.
-  * Issue time-boxed grants with automatic millisecond-level expiration.
-  * Issue external sharing invites with bounded expirations and email binding.
-  * Soft-delete documents (retaining 30-day recovery) and perform permanent owner-only purge.
-  * Approve or deny access requests submitted by users who attempt direct links.
-  * View the "Who can see this?" real-time panel and trigger emergency "Revoke all" actions.
+  * Issue `read` and `edit` grants to users in the organization, set optional expirations, and revoke individual or all grants.
+  * Create recipient-bound invitation links with an expiry and revoke them before they are used. The recipient must have a workspace account and sign in with the invited email.
+  * Review and approve or deny incoming document access requests.
+  * Review pending requests and past decisions, choose the granted permission and expiry, and attach a note to the requester.
+  * Inspect document grants, revoke all grants during an incident, and confirm or reject permission suggestions.
 * **Security Boundary**:
   * Owners have zero privilege over documents owned by other users, unless explicitly granted.
 
 ### 1.3 Viewer
 * **Purpose**: Target consumer or collaborator on specific granted documents.
 * **Capabilities**:
-  * Read or edit documents where an explicit, active `document_grants` entry exists for their user ID.
-  * Request access when navigating to an ungranted document direct link (neutral UI without leaking title or metadata).
+  * Read, download, or edit documents according to an explicit, active `document_grants` entry.
+  * Request read or edit access using a document UUID or link, or request edit access from a document they can read.
+  * Search and filter a private request history with owner notes, decision dates, and the current grant state. Open a document directly when its grant is active.
 * **Security Boundary**:
-  * Viewers have zero document listing visibility: search results, list endpoints, and autocomplete omit any document where the viewer does not possess an active grant.
+* Search results, list endpoints, and autocomplete omit documents without an active grant. Request history contains only requests submitted by the signed-in user.
+
+### 1.4 Admin access-request oversight
+* Administrators can filter their organization-scoped audit log to access-request events without receiving document-content access or owner review controls.
 
 ---
 
@@ -65,4 +67,4 @@ TrustVault enforces a strict, zero-trust security model founded on the principle
 * Cross-tenant access is structurally impossible:
   * Users in Company A cannot see, grant, or request access to documents in Company B.
   * Queries filter on `organization_id` at the database index level.
-  * Any cross-tenant attempt returns a generic `404 Not Found` and logs a high-severity `DENIED` audit event.
+  * Document operations return a generic `404 Not Found`; access-request submission returns the same neutral response for missing and cross-tenant documents.

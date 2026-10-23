@@ -111,10 +111,29 @@ export const api = {
   // ── Access requests ──────────────────────────────────────────
   accessRequests: {
     submit: (docId: string, targetPermission: 'read' | 'edit' = 'read') =>
-      request<{ message: string }>('POST', `/documents/${docId}/access-requests`, { targetPermission }),
+      request<{ message: string }>('POST', `/documents/${encodeURIComponent(docId)}/access-requests`, { targetPermission }),
     listPending: () => request<{ requests: AccessRequest[] }>('GET', '/access-requests'),
-    review: (requestId: string, decision: 'approve' | 'deny', permission?: 'read' | 'edit', expiresAt?: string | null) =>
-      request<AccessRequest>('POST', `/access-requests/${requestId}/review`, { decision, permission, expiresAt }),
+    listOwned: () => request<{ requests: AccessRequest[] }>('GET', '/access-requests?status=all'),
+    listMine: () => request<{ requests: AccessRequest[] }>('GET', '/access-requests/mine'),
+    review: (
+      requestId: string,
+      decision: 'approve' | 'deny',
+      permission: 'read' | 'edit' = 'read',
+      expiresAt: string | null = null,
+      reviewerNotes: string | null = null
+    ) => request<{ status: 'approved' | 'denied'; message: string }>(
+      'POST', `/access-requests/${requestId}/review`, { decision, permission, expiresAt, reviewerNotes }
+    ),
+  },
+
+  // ── External share invitations ─────────────────────────────
+  invites: {
+    create: (docId: string, recipientEmail: string, permission: 'read' | 'edit', expiresInHours = 72) =>
+      request<{ invite: ShareInvite; rawToken: string }>('POST', `/documents/${docId}/invites`, { recipientEmail, permission, expiresInHours }),
+    list: (docId: string) => request<{ invites: ShareInvite[] }>('GET', `/documents/${docId}/invites`),
+    revoke: (docId: string, inviteId: string) =>
+      request<{ message: string }>('DELETE', `/documents/${docId}/invites/${inviteId}`),
+    accept: (token: string) => request<{ message: string }>('POST', '/invites/accept', { token }),
   },
 
   // ── Admin ────────────────────────────────────────────────────
@@ -131,8 +150,9 @@ export const api = {
       return request<{ events: AuditEvent[]; pagination: Pagination }>('GET', `/admin/audit${qs}`);
     },
     verifyChain: () => request<{ isValid: boolean; totalRecords: number; brokenAtSequence: number | null; message: string }>('GET', '/admin/audit/verify'),
-    exportCsv: async () => {
-      const res = await fetch(`${API_BASE_URL}/admin/audit/export`, {
+    exportCsv: async (params?: Record<string, string>) => {
+      const qs = params ? '?' + new URLSearchParams(params).toString() : '';
+      const res = await fetch(`${API_BASE_URL}/admin/audit/export${qs}`, {
         method: 'GET',
         credentials: 'include',
       });
@@ -152,7 +172,7 @@ export const api = {
     },
     activityUser: (userId: string, params?: Record<string, string>) => {
       const qs = params ? '?' + new URLSearchParams(params).toString() : '';
-      return request<{ events: AuditEvent[]; pagination: Pagination }>('GET', `/admin/activity/user/${userId}${qs}`);
+      return request<{ events: UserActivityEvent[]; pagination: Pagination }>('GET', `/admin/activity/user/${userId}${qs}`);
     },
   },
 
@@ -226,13 +246,33 @@ export interface Grant {
 export interface AccessRequest {
   id: string;
   documentId: string;
-  documentTitle?: string;
+  documentTitle: string;
   requesterId: string;
+  requesterName: string;
   requesterEmail: string;
   targetPermission: 'read' | 'edit';
   status: 'pending' | 'approved' | 'denied';
   createdAt: string;
-  reviewerNotes?: string;
+  documentOwnerName?: string;
+  documentOwnerEmail?: string;
+  reviewedAt?: string | null;
+  reviewerName?: string | null;
+  reviewerNotes?: string | null;
+  currentAccessStatus?: 'active' | 'expired' | 'none' | 'unavailable';
+  currentGrantPermission?: 'read' | 'edit' | null;
+  currentGrantExpiresAt?: string | null;
+  documentDeleted?: boolean;
+}
+
+export interface ShareInvite {
+  id: string;
+  documentId: string;
+  email: string;
+  permission: 'read' | 'edit';
+  expiresAt: string;
+  revokedAt: string | null;
+  usedAt: string | null;
+  createdAt: string;
 }
 
 export interface AuditEvent {
@@ -248,6 +288,19 @@ export interface AuditEvent {
   reason?: string;
   ipAddress?: string;
   createdAt: string;
+}
+
+export interface UserActivityEvent {
+  id: string;
+  sequence_number: number | string;
+  event_type: string;
+  target_type?: string | null;
+  target_id?: string | null;
+  action: string;
+  status: string;
+  reason?: string | null;
+  ip_address?: string | null;
+  created_at: string;
 }
 
 export interface Pagination {

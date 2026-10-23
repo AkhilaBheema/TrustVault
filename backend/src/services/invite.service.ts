@@ -297,6 +297,24 @@ export class InviteService {
         throw new AuthorizationError('Resource not found or access denied.', 404);
       }
 
+      // A valid invite cannot bridge workspace boundaries, even if its recipient
+      // happens to have the same email address in a different organization.
+      if (invite.organization_id !== acceptingUser.organizationId) {
+        await client.query('ROLLBACK');
+        await AuditService.log({
+          eventType: 'SHARE_LINK',
+          action: 'SHARE_LINK_USE_FAILED',
+          status: 'DENIED',
+          actorId: acceptingUser.id,
+          actorEmail: acceptingUser.email,
+          targetId: invite.document_id,
+          reason: 'Attempted redemption of a share invite from another workspace',
+          ipAddress,
+          userAgent,
+        });
+        throw new AuthorizationError('Resource not found or access denied.', 404);
+      }
+
       // Convert invite into active document grant
       await client.query(
         `INSERT INTO document_grants (document_id, user_id, permission, granted_by, grant_version)

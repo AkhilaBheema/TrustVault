@@ -1,7 +1,7 @@
 import pg from 'pg';
-import dotenv from 'dotenv';
+import { loadEnvironment } from '../config/env.js';
 
-dotenv.config();
+loadEnvironment();
 
 const databaseUrl =
   process.env.DATABASE_URL || 'postgresql://trustvault:trustvault_secret@localhost:5432/trustvault';

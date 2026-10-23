@@ -24,17 +24,32 @@ export async function accessRequestRoutes(app: FastifyInstance) {
       const { id: documentId } = request.params as { id: string };
 
       const parsed = submitAccessRequestSchema.safeParse(request.body || {});
-      const targetPermission = parsed.success ? parsed.data.targetPermission : 'read';
+      if (!parsed.success) {
+        return reply.status(400).send({
+          error: 'Bad Request',
+          message: parsed.error.errors[0]?.message || 'Invalid access request data',
+        });
+      }
 
       const result = await AccessRequestService.submitRequest(
         user,
         documentId,
-        targetPermission,
+        parsed.data.targetPermission,
         request.ip,
         request.headers['user-agent'] || null
       );
 
       return reply.status(200).send(result);
+    }
+  );
+
+  // Requesters can review their own requests without exposing another user's history.
+  app.get(
+    '/api/access-requests/mine',
+    { preHandler: [authenticate] },
+    async (request, reply) => {
+      const requests = await AccessRequestService.listRequestsForRequester(request.user!);
+      return reply.status(200).send({ requests });
     }
   );
 
@@ -44,7 +59,9 @@ export async function accessRequestRoutes(app: FastifyInstance) {
     { preHandler: [authenticate, requireRole('owner')] },
     async (request, reply) => {
       const user = request.user!;
-      const requests = await AccessRequestService.listPendingRequestsForOwner(user);
+      const query = request.query as { status?: string };
+      const status = query.status === 'all' ? 'all' : 'pending';
+      const requests = await AccessRequestService.listRequestsForOwner(user, status);
       return reply.status(200).send({ requests });
     }
   );

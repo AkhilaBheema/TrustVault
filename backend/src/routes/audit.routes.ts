@@ -17,7 +17,7 @@ import { pool } from '../db/index.js';
  */
 export async function auditRoutes(app: FastifyInstance) {
   // 1. List audit events (admin-only, org-scoped, paginated)
-  //    Supports filter params: status, actorId, targetId, fromDate, toDate
+  //    Supports filter params: status, eventType, actorId, targetId, fromDate, toDate
   app.get(
     '/api/admin/audit',
     { preHandler: [authenticate, requireRole('admin')] },
@@ -33,6 +33,11 @@ export async function auditRoutes(app: FastifyInstance) {
       // Whitelist allowed status values to prevent SQL injection via enum bypass
       const ALLOWED_STATUSES = new Set(['ALLOWED', 'DENIED', 'ERROR', 'INFO']);
       const statusFilter = q.status && ALLOWED_STATUSES.has(q.status) ? q.status : null;
+      const ALLOWED_EVENT_TYPES = new Set([
+        'ACCESS_DENIED', 'ACCESS_REQUEST', 'AI_SUGGESTION', 'AUTH_LOGIN', 'AUTH_LOGOUT',
+        'DOCUMENT_LIFECYCLE', 'GRANT_LIFECYCLE', 'SECURITY_ALERT', 'SHARE_LINK', 'USER_ADMIN',
+      ]);
+      const eventTypeFilter = q.eventType && ALLOWED_EVENT_TYPES.has(q.eventType) ? q.eventType : null;
 
       // Only accept UUID-formatted actorId/targetId to prevent injection
       const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -55,6 +60,10 @@ export async function auditRoutes(app: FastifyInstance) {
       if (statusFilter) {
         conditions += ` AND ae.status = $${idx++}`;
         params.push(statusFilter);
+      }
+      if (eventTypeFilter) {
+        conditions += ` AND ae.event_type = $${idx++}`;
+        params.push(eventTypeFilter);
       }
       if (actorIdFilter) {
         conditions += ` AND ae.actor_id = $${idx++}`;

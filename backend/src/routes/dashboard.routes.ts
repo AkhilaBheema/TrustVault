@@ -372,9 +372,14 @@ export async function dashboardRoutes(app: FastifyInstance) {
       const q = request.query as Record<string, string | undefined>;
 
       const ALLOWED_STATUSES = new Set(['ALLOWED', 'DENIED', 'ERROR', 'INFO']);
+      const ALLOWED_EVENT_TYPES = new Set([
+        'ACCESS_DENIED', 'ACCESS_REQUEST', 'AI_SUGGESTION', 'AUTH_LOGIN', 'AUTH_LOGOUT',
+        'DOCUMENT_LIFECYCLE', 'GRANT_LIFECYCLE', 'SECURITY_ALERT', 'SHARE_LINK', 'USER_ADMIN',
+      ]);
       const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
       const statusFilter = q.status && ALLOWED_STATUSES.has(q.status) ? q.status : null;
+      const eventTypeFilter = q.eventType && ALLOWED_EVENT_TYPES.has(q.eventType) ? q.eventType : null;
       const actorIdFilter = q.actorId && UUID_RE.test(q.actorId) ? q.actorId : null;
       const targetIdFilter = q.targetId && UUID_RE.test(q.targetId) ? q.targetId : null;
       const fromDate = q.fromDate ? new Date(q.fromDate) : null;
@@ -387,6 +392,7 @@ export async function dashboardRoutes(app: FastifyInstance) {
       let conditions = 'WHERE organization_id = $1';
 
       if (statusFilter) { conditions += ` AND status = $${idx++}`; params.push(statusFilter); }
+      if (eventTypeFilter) { conditions += ` AND event_type = $${idx++}`; params.push(eventTypeFilter); }
       if (actorIdFilter) { conditions += ` AND actor_id = $${idx++}`; params.push(actorIdFilter); }
       if (targetIdFilter) { conditions += ` AND target_id = $${idx++}`; params.push(targetIdFilter); }
       if (validFrom) { conditions += ` AND created_at >= $${idx++}`; params.push(validFrom); }

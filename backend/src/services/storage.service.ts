@@ -1,9 +1,9 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
-import dotenv from 'dotenv';
+import { loadEnvironment } from '../config/env.js';
 
-dotenv.config();
+loadEnvironment();
 
 const STORAGE_DIR = process.env.STORAGE_DIR || path.resolve(process.cwd(), 'uploads');
 

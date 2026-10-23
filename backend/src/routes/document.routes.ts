@@ -79,12 +79,26 @@ export async function documentRoutes(app: FastifyInstance) {
 
     return reply.status(200).send({
       document: {
-        ...docRes.rows[0],
+        id: docRes.rows[0].id,
+        title: docRes.rows[0].title,
+        description: docRes.rows[0].description,
+        category: docRes.rows[0].category,
+        ownerId: docRes.rows[0].owner_id,
+        ownerName: docRes.rows[0].owner_name,
+        ownerEmail: docRes.rows[0].owner_email,
+        isDeleted: docRes.rows[0].is_deleted,
+        createdAt: docRes.rows[0].created_at,
+        updatedAt: docRes.rows[0].updated_at,
         effectivePermission: auth.effectivePermission,
       },
       versions: versionsRes.rows.map((v) => ({
-        ...v,
+        id: v.id,
+        versionNumber: v.version_number,
         fileSize: parseInt(v.file_size, 10),
+        mimeType: v.mime_type,
+        originalFilename: v.original_filename,
+        sha256Hash: v.sha256_hash,
+        createdAt: v.created_at,
       })),
     });
   });

@@ -4,7 +4,7 @@ import cors from '@fastify/cors';
 import cookie from '@fastify/cookie';
 import rateLimit from '@fastify/rate-limit';
 import multipart from '@fastify/multipart';
-import dotenv from 'dotenv';
+import { loadEnvironment } from './config/env.js';
 import { authRoutes } from './routes/auth.routes.js';
 import { adminRoutes } from './routes/admin.routes.js';
 import { documentRoutes } from './routes/document.routes.js';
@@ -14,7 +14,7 @@ import { auditRoutes } from './routes/audit.routes.js';
 import { dashboardRoutes } from './routes/dashboard.routes.js';
 import { suggestionsRoutes } from './routes/suggestions.routes.js';
 
-dotenv.config();
+loadEnvironment();
 
 export interface AppOptions {
   enableLogging?: boolean;

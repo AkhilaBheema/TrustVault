@@ -1,7 +1,7 @@
 import crypto from 'node:crypto';
-import dotenv from 'dotenv';
+import { loadEnvironment } from '../config/env.js';
 
-dotenv.config();
+loadEnvironment();
 
 const ALGORITHM = 'aes-256-gcm';
 const IV_LENGTH = 12; // 96 bits for GCM

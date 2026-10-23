@@ -4,14 +4,14 @@ import {
   Lock, Unlock, LogOut, ChevronRight, AlertTriangle,
   CheckCircle, XCircle, Clock, Download, Eye,
   RefreshCw, Plus, X, ShieldCheck, Sparkles,
-  FileCheck, Activity, Bell, Key,
-  ArrowRight, ArrowUpRight, Sun, Moon, Fingerprint, Database,
+  FileCheck, Activity, Bell, Key, Copy,
+  ArrowRight, ArrowUpRight, Sun, Moon, Fingerprint,
 } from 'lucide-react';
 import './index.css';
 import './redesign.css';
 import {
   api, API_BASE_URL, saveCsrfToken, clearCsrfToken, ApiError,
-  type User, type Document, type Suggestion,
+  type User, type Document, type Suggestion, type ShareInvite, type AccessRequest,
 } from './api.ts';
 
 // ============================================================
@@ -153,8 +153,8 @@ function formatBytes(bytes: number) {
 // ============================================================
 
 function CommandPalette({
-  onClose, onNavigate, documents,
-}: { onClose: () => void; onNavigate: (view: string, docId?: string) => void; documents: Document[] }) {
+  onClose, onNavigate, documents, user,
+}: { onClose: () => void; onNavigate: (view: string, docId?: string) => void; documents: Document[]; user: User }) {
   const [query, setQuery] = useState('');
   const [selected, setSelected] = useState(0);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -164,9 +164,17 @@ function CommandPalette({
   const commands = [
     { label: 'Dashboard', icon: <BarChart3 size={16} />, action: () => onNavigate('dashboard') },
     { label: 'My Documents', icon: <FileText size={16} />, action: () => onNavigate('documents') },
-    { label: 'Upload Document', icon: <Upload size={16} />, action: () => onNavigate('upload') },
-    { label: 'Audit Log', icon: <Activity size={16} />, action: () => onNavigate('audit') },
-    { label: 'Manage Users', icon: <Users size={16} />, action: () => onNavigate('users') },
+    ...(user.role === 'owner' ? [
+      { label: 'Upload Document', icon: <Upload size={16} />, action: () => onNavigate('upload') },
+      { label: 'Access Requests', icon: <Key size={16} />, action: () => onNavigate('access-requests') },
+    ] : []),
+    ...(user.role === 'viewer' ? [
+      { label: 'My Access Requests', icon: <Clock size={16} />, action: () => onNavigate('my-requests') },
+    ] : []),
+    ...(user.role === 'admin' ? [
+      { label: 'Audit Log', icon: <Activity size={16} />, action: () => onNavigate('audit') },
+      { label: 'Manage Users', icon: <Users size={16} />, action: () => onNavigate('users') },
+    ] : []),
     ...documents.map((d) => ({
       label: d.title,
       icon: <FileText size={16} />,
@@ -230,19 +238,6 @@ function CommandPalette({
   );
 }
 
-// ============================================================
-// Demo identities
-// ============================================================
-
-const DEMO_PERSONAS = [
-  { label: 'Acme Owner', email: 'owner@acme.com', role: 'Owner', desc: 'Owns Strategy & Roadmap' },
-  { label: 'Acme Viewer', email: 'viewer@acme.com', role: 'Viewer', desc: 'Granted Strategy, Denied Roadmap' },
-  { label: 'Acme Admin', email: 'admin@acme.com', role: 'Admin', desc: 'Manages Users, Zero Content Access' },
-  { label: 'Stark Owner', email: 'owner@stark.com', role: 'Owner', desc: 'Isolated workspace: Stark Industries' },
-  { label: 'Stark Viewer', email: 'viewer@stark.com', role: 'Viewer', desc: 'Arc Reactor access; budget denied' },
-  { label: 'Stark Admin', email: 'admin@stark.com', role: 'Admin', desc: 'Manages Stark users and audit' },
-];
-
 function BrandLockup({ onClick }: { onClick?: () => void }) {
   return (
     <button className="brand-lockup" type="button" onClick={onClick} aria-label="TrustVault home">
@@ -296,15 +291,15 @@ function PublicLanding({ onSignIn, onRequestAccess }: { onSignIn: () => void; on
             <div className="signal-node node-one"><span /> IDENTITY VERIFIED</div>
             <div className="signal-node node-two"><span /> DEFAULT DENY</div>
             <div className="vault-card">
-              <div className="vault-card-head"><span><span className="live-pip" /> LIVE POLICY CHECK</span><span className="card-index">TV / 001</span></div>
+              <div className="vault-card-head"><span><span className="live-pip" /> POLICY ENGINE</span><span className="card-index">DEFAULT DENY</span></div>
               <div className="file-preview">
                 <div className="file-glyph"><FileText size={20} strokeWidth={1.5} /></div>
-                <div><strong>Northstar strategy</strong><small>Confidential · PDF · 4.8 MB</small></div>
+                <div><strong>Protected document</strong><small>Encrypted · Access scoped</small></div>
                 <span className="file-lock"><Lock size={14} /></span>
               </div>
               <div className="gate-flow"><span className="flow-line" /><div className="gate-icon"><Shield size={19} strokeWidth={1.6} /></div><span className="flow-line" /></div>
-              <div className="decision-line"><div><small>DECISION</small><strong><i /> Authorized</strong></div><div className="decision-time">14 ms</div></div>
-              <div className="ledger-line"><Fingerprint size={16} /><span>SEALED TO AUDIT LEDGER</span><span className="ledger-hash">a84c...09de</span></div>
+              <div className="decision-line"><div><small>POLICY RESULT</small><strong><i /> Authorized</strong></div><div className="decision-time">GRANT</div></div>
+              <div className="ledger-line"><Fingerprint size={16} /><span>RECORDED IN AUDIT CHAIN</span><span className="ledger-hash">APPEND-ONLY</span></div>
             </div>
             <div className="denied-stamp"><span>DENIED</span><small>NO GRANT FOUND</small></div>
           </div>
@@ -343,20 +338,18 @@ function PublicLanding({ onSignIn, onRequestAccess }: { onSignIn: () => void; on
   );
 }
 
-function LoginPage({ onLogin, onQuickSwitch, mode, onHome, onSwitchMode }: {
+function LoginPage({ onLogin, mode, onHome, onSwitchMode, inviteToken, requestDocumentId }: {
   onLogin: (user: User) => void;
-  onQuickSwitch: (email: string) => void;
   mode: 'login' | 'signup';
   onHome: () => void;
   onSwitchMode: (mode: 'login' | 'signup') => void;
+  inviteToken?: string | null;
+  requestDocumentId?: string | null;
 }) {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
-  const [name, setName] = useState('');
-  const [adminEmail, setAdminEmail] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
-  const [requestReady, setRequestReady] = useState(false);
   const addToast = useToast();
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -366,6 +359,15 @@ function LoginPage({ onLogin, onQuickSwitch, mode, onHome, onSwitchMode }: {
     try {
       const res = await api.auth.login(email.trim(), password);
       saveCsrfToken(res.csrfToken);
+      if (inviteToken) {
+        try {
+          const accepted = await api.invites.accept(inviteToken);
+          addToast(accepted.message || 'Invitation accepted.', 'success');
+        } catch (inviteError) {
+          addToast(inviteError instanceof Error ? `Signed in, but the invitation could not be accepted: ${inviteError.message}` : 'Signed in, but the invitation could not be accepted.', 'warning');
+        }
+      }
+      if (inviteToken || requestDocumentId) window.history.replaceState({}, '', `${window.location.pathname}${window.location.search}#/login`);
       onLogin(res.user);
       addToast(`Signed in as ${res.user.name}`, 'success');
     } catch (err) {
@@ -374,19 +376,6 @@ function LoginPage({ onLogin, onQuickSwitch, mode, onHome, onSwitchMode }: {
     } finally {
       setLoading(false);
     }
-  };
-
-  const handleInviteRequest = (e: React.FormEvent) => {
-    e.preventDefault();
-    const subject = encodeURIComponent('TrustVault workspace access request');
-    const body = encodeURIComponent(`Hello,
-
-${name} (${email}) would like access to our TrustVault workspace.
-
-Please let me know the next step.
-`);
-    window.location.href = `mailto:${encodeURIComponent(adminEmail)}?subject=${subject}&body=${body}`;
-    setRequestReady(true);
   };
 
   return (
@@ -416,20 +405,12 @@ Please let me know the next step.
                   {error && <div className="auth-error" role="alert"><XCircle size={15} /><span>{error}</span></div>}
                   <button type="submit" disabled={loading} className="button button-accent auth-submit">{loading ? <><RefreshCw size={16} className="animate-spin" /> Checking credentials</> : <>Continue securely <ArrowRight size={16} /></>}</button>
                 </form>
-                <div className="demo-access"><div className="demo-access-label"><span>EXPLORE A LIVE DEMO</span><span>TEST WORKSPACES</span></div><div className="demo-access-buttons">{DEMO_PERSONAS.map((persona) => <button type="button" key={persona.email} onClick={() => onQuickSwitch(persona.email)} title={`${persona.label} · ${persona.desc}`}><span className="demo-avatar">{persona.role.slice(0, 1)}</span><span>{persona.label}</span><ArrowUpRight size={12} /></button>)}</div></div>
                 <div className="auth-foot"><Lock size={13} /><span>Sessions are private, scoped, and immediately revocable.</span></div>
               </>
             ) : (
               <>
-                <div className="auth-card-title"><span className="form-kicker">REQUEST AN INVITATION</span><h2>Join your team.</h2><p>Accounts are created by your workspace administrator. We’ll prepare a request you can send them.</p></div>
-                <form onSubmit={handleInviteRequest} className="public-form">
-                  <div className="public-field"><label htmlFor="invite-name">Your name</label><input id="invite-name" value={name} onChange={(e) => setName(e.target.value)} placeholder="Full name" className="public-input" autoComplete="name" required /></div>
-                  <div className="public-field"><label htmlFor="invite-email">Work email</label><input id="invite-email" type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="you@company.com" className="public-input" autoComplete="email" required /></div>
-                  <div className="public-field"><label htmlFor="admin-email">Workspace administrator’s email</label><input id="admin-email" type="email" value={adminEmail} onChange={(e) => setAdminEmail(e.target.value)} placeholder="admin@company.com" className="public-input" required /></div>
-                  <button type="submit" className="button button-accent auth-submit">Prepare access request <ArrowUpRight size={16} /></button>
-                  {requestReady && <p className="request-note" role="status"><CheckCircle size={15} /> Your email app should open with the request ready to send.</p>}
-                </form>
-                <div className="auth-foot"><Lock size={13} /><span>No account is created until your administrator approves it.</span></div>
+                <div className="auth-card-title"><span className="form-kicker">WORKSPACE ACCESS</span><h2>Join your team.</h2><p>Your workspace administrator creates accounts and assigns permissions. Contact them to request access.</p></div>
+                <div className="auth-foot"><Lock size={13} /><span>For security, accounts are provisioned by your organization.</span></div>
               </>
             )}
           </div>
@@ -444,7 +425,7 @@ Please let me know the next step.
 // Sidebar + Layout
 // ============================================================
 
-type View = 'dashboard' | 'documents' | 'upload' | 'doc-detail' | 'users' | 'audit' | 'access-requests' | 'settings';
+type View = 'dashboard' | 'documents' | 'upload' | 'doc-detail' | 'users' | 'audit' | 'access-requests' | 'my-requests' | 'settings';
 
 interface NavItem {
   id: View;
@@ -458,6 +439,7 @@ const NAV_ITEMS: NavItem[] = [
   { id: 'documents', label: 'Documents', icon: <FileText size={16} />, roles: ['admin', 'owner', 'viewer'] },
   { id: 'upload', label: 'Upload', icon: <Upload size={16} />, roles: ['owner'] },
   { id: 'access-requests', label: 'Access Requests', icon: <Key size={16} />, roles: ['owner'] },
+  { id: 'my-requests', label: 'My Requests', icon: <Clock size={16} />, roles: ['viewer'] },
   { id: 'users', label: 'Manage Users', icon: <Users size={16} />, roles: ['admin'] },
   { id: 'audit', label: 'Audit Log', icon: <Activity size={16} />, roles: ['admin'] },
 ];
@@ -530,15 +512,46 @@ function Sidebar({ active, onNavigate, user }: { active: View; onNavigate: (v: V
 // ============================================================
 
 function DocumentsView({ onNavigate }: { onNavigate: (v: View, id?: string) => void }) {
+  const { user } = useAuth();
+  const addToast = useToast();
   const [search, setSearch] = useState('');
   const [category, setCategory] = useState('');
-
-  const { data, loading, refetch } = useAsync(
-    () => api.documents.list({ ...(search ? { search } : {}), ...(category ? { category } : {}) }),
-    [search, category]
+  const { data, loading, error, refetch } = useAsync(() => api.documents.list(), []);
+  const { data: requestsData, refetch: refetchRequests } = useAsync(
+    () => user?.role === 'viewer' ? api.accessRequests.listMine() : Promise.resolve(null),
+    [user?.role]
   );
-
   const docs = data?.documents || [];
+  const categories = [...new Set(docs.map((doc) => doc.category).filter(Boolean))].sort((a, b) => a.localeCompare(b));
+  const visibleDocs = docs.filter((doc) =>
+    (!category || doc.category === category) && doc.title.toLowerCase().includes(search.trim().toLowerCase())
+  );
+  const pendingEditRequests = new Set((requestsData?.requests || [])
+    .filter((request) => request.status === 'pending' && request.targetPermission === 'edit')
+    .map((request) => request.documentId));
+  const pendingRequestCount = (requestsData?.requests || []).filter((request) => request.status === 'pending').length;
+
+  const requestEditAccess = async (doc: Document) => {
+    try {
+      const result = await api.accessRequests.submit(doc.id, 'edit');
+      addToast(result.message, 'success');
+      await refetchRequests();
+    } catch (err) {
+      addToast(err instanceof Error ? err.message : 'Could not submit the access request.', 'error');
+    }
+  };
+
+  const roleShortcuts = user?.role === 'owner'
+    ? <>
+        <button className="btn-vault-secondary px-3 py-2" onClick={() => onNavigate('access-requests')}><Key size={14} /> Review requests</button>
+        <button className="btn-vault-primary px-3 py-2" onClick={() => onNavigate('upload')}><Upload size={14} /> Upload document</button>
+      </>
+    : user?.role === 'admin'
+      ? <>
+          <button className="btn-vault-secondary px-3 py-2" onClick={() => onNavigate('users')}><Users size={14} /> Manage users</button>
+          <button className="btn-vault-secondary px-3 py-2" onClick={() => onNavigate('audit')}><Activity size={14} /> Audit log</button>
+        </>
+      : <button className="btn-vault-secondary px-3 py-2" onClick={() => onNavigate('my-requests')}><Key size={14} /> My requests{pendingRequestCount > 0 ? ` · ${pendingRequestCount} pending` : ''}</button>;
 
   return (
     <div className="space-y-6 animate-fade-in">
@@ -553,11 +566,12 @@ function DocumentsView({ onNavigate }: { onNavigate: (v: View, id?: string) => v
             Authorized Documents
           </h1>
           <p className="text-slate-400 text-sm mt-1">
-            Documents filtered by kernel authorization. Inaccessible files never leak via search, count, or metadata.
+            Only documents granted to your account appear here. Search and category filters stay within this authorized list.
           </p>
         </div>
 
-        <div className="flex items-center gap-3">
+        <div className="flex flex-wrap items-center gap-3">
+          {roleShortcuts}
           <div className="relative">
             <Search size={15} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-500" aria-hidden />
             <input
@@ -575,9 +589,9 @@ function DocumentsView({ onNavigate }: { onNavigate: (v: View, id?: string) => v
         </div>
       </div>
 
-      {/* Category Filter Pills */}
-      <div className="flex items-center gap-2 overflow-x-auto pb-1">
-        {['', 'Finance', 'Engineering', 'Legal', 'General'].map((cat) => (
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div className="flex items-center gap-2 overflow-x-auto pb-1" aria-label="Filter documents by category">
+        {['', ...categories].map((cat) => (
           <button
             key={cat}
             onClick={() => setCategory(cat)}
@@ -587,9 +601,11 @@ function DocumentsView({ onNavigate }: { onNavigate: (v: View, id?: string) => v
                 : 'bg-slate-900/60 hover:bg-slate-800 text-slate-400 border border-slate-800'
             }`}
           >
-            {cat === '' ? 'All Enclaves' : cat}
+            {cat === '' ? `All categories · ${docs.length}` : `${cat} · ${docs.filter((doc) => doc.category === cat).length}`}
           </button>
         ))}
+        </div>
+        <p className="text-slate-500 text-xs">Showing {visibleDocs.length} of {docs.length} authorized document{docs.length === 1 ? '' : 's'}</p>
       </div>
 
       {/* Content Table / Cards */}
@@ -599,11 +615,16 @@ function DocumentsView({ onNavigate }: { onNavigate: (v: View, id?: string) => v
             <div key={i} className="skeleton h-12 w-full" />
           ))}
         </div>
-      ) : docs.length === 0 ? (
+      ) : error ? (
+        <div className="alert alert-danger" role="alert"><XCircle size={15} /><span>{error}</span><button className="btn btn-ghost btn-sm" onClick={refetch}>Retry</button></div>
+      ) : visibleDocs.length === 0 ? (
         <div className="empty-state">
           <div className="empty-state-icon"><FileText size={28} /></div>
-          <h3>No accessible documents</h3>
-          <p>{search ? 'No files match your query in this scope.' : 'Zero explicit grants issued to this identity.'}</p>
+          <h3>{docs.length === 0 ? 'No accessible documents' : 'No matching documents'}</h3>
+          <p>{docs.length > 0 ? 'Try another title or category filter.' : user?.role === 'viewer' ? 'Ask the owner for a request link. It will take you to a form that sends an access request without showing the document.' : user?.role === 'owner' ? 'Upload a document to start managing access and requests.' : 'There are no documents granted to this account.'}</p>
+          {docs.length === 0 && user?.role === 'viewer' && <button className="btn-vault-primary mt-4" onClick={() => onNavigate('my-requests')}><Key size={14} /> Request document access</button>}
+          {docs.length === 0 && user?.role === 'owner' && <button className="btn-vault-primary mt-4" onClick={() => onNavigate('upload')}><Upload size={14} /> Upload a document</button>}
+          {docs.length === 0 && user?.role === 'admin' && <div className="flex justify-center gap-2 mt-4"><button className="btn-vault-secondary" onClick={() => onNavigate('users')}><Users size={14} /> Manage users</button><button className="btn-vault-secondary" onClick={() => onNavigate('audit')}><Activity size={14} /> Review audit log</button></div>}
         </div>
       ) : (
         <div className="table-container shadow-xl">
@@ -619,7 +640,7 @@ function DocumentsView({ onNavigate }: { onNavigate: (v: View, id?: string) => v
               </tr>
             </thead>
             <tbody>
-              {docs.map((doc) => (
+              {visibleDocs.map((doc) => (
                 <tr key={doc.id} className="hover:bg-slate-800/40 transition-colors">
                   <td>
                     <button
@@ -637,13 +658,14 @@ function DocumentsView({ onNavigate }: { onNavigate: (v: View, id?: string) => v
                   <td className="text-slate-400 text-xs font-mono">{doc.ownerEmail || '—'}</td>
                   <td className="text-slate-400 text-xs font-mono">{formatDate(doc.updatedAt)}</td>
                   <td className="text-right">
-                    <button
-                      className="btn-vault-secondary text-xs py-1.5 px-3"
-                      onClick={() => onNavigate('doc-detail', doc.id)}
-                      aria-label={`Open ${doc.title}`}
-                    >
-                      <Eye size={13} /> Open
-                    </button>
+                    <div className="flex justify-end gap-2">
+                      {user?.role === 'viewer' && doc.effectivePermission === 'read' && (
+                        pendingEditRequests.has(doc.id)
+                          ? <button className="btn-vault-secondary text-xs py-1.5 px-3" disabled aria-label={`Edit access request pending for ${doc.title}`}><Clock size={13} /> Pending</button>
+                          : <button className="btn-vault-secondary text-xs py-1.5 px-3" onClick={() => requestEditAccess(doc)} aria-label={`Request edit access to ${doc.title}`}><Key size={13} /> Request edit</button>
+                      )}
+                      <button className="btn-vault-secondary text-xs py-1.5 px-3" onClick={() => onNavigate('doc-detail', doc.id)} aria-label={`Open ${doc.title}`}><Eye size={13} /> Open</button>
+                    </div>
                   </td>
                 </tr>
               ))}
@@ -666,21 +688,96 @@ function DocumentDetailView({ docId, onBack }: { docId: string; onBack: () => vo
   const [showSuggestions, setShowSuggestions] = useState(false);
   const [suggestions, setSuggestions] = useState<Suggestion[]>([]);
   const [loadingSuggestions, setLoadingSuggestions] = useState(false);
+  const [recipientEmail, setRecipientEmail] = useState('');
+  const [invitePermission, setInvitePermission] = useState<'read' | 'edit'>('read');
+  const [inviteExpiry, setInviteExpiry] = useState(72);
+  const [creatingInvite, setCreatingInvite] = useState(false);
+  const [issuedInviteLink, setIssuedInviteLink] = useState<string | null>(null);
+  const [issuedAccessRequestLink, setIssuedAccessRequestLink] = useState<string | null>(null);
+  const [requestingEditAccess, setRequestingEditAccess] = useState(false);
+  const [uploadingVersion, setUploadingVersion] = useState(false);
+  const versionInputRef = useRef<HTMLInputElement>(null);
 
-  const { data, loading, error } = useAsync(
+  const { data, loading, error, refetch: refetchDocument } = useAsync(
     () => api.documents.get(docId),
-    [docId]
-  );
-
-  const { data: grantsData, loading: grantsLoading, refetch: refetchGrants } = useAsync(
-    () => api.grants.list(docId),
     [docId]
   );
 
   const doc = data?.document;
   const versions = data?.versions || [];
-  const grants = grantsData?.grants || [];
   const isOwner = user?.role === 'owner' && doc?.ownerId === user?.id;
+  const { data: myRequestsData, refetch: refetchMyRequests } = useAsync(
+    () => user?.role === 'viewer' ? api.accessRequests.listMine() : Promise.resolve({ requests: [] as AccessRequest[] }),
+    [user?.role]
+  );
+  const editRequestPending = (myRequestsData?.requests || []).some((request) =>
+    request.documentId === docId && request.targetPermission === 'edit' && request.status === 'pending'
+  );
+  const { data: grantsData, loading: grantsLoading, refetch: refetchGrants } = useAsync(
+    () => isOwner ? api.grants.list(docId) : Promise.resolve({ grants: [], ownerId: '', ownerEmail: '' }),
+    [docId, isOwner]
+  );
+  const grants = grantsData?.grants || [];
+  const activeGrantCount = grants.filter((grant) => !grant.expiresAt || new Date(grant.expiresAt).getTime() > Date.now()).length;
+  const expiredGrantCount = grants.length - activeGrantCount;
+  const canUploadVersion = doc?.effectivePermission === 'owner' || doc?.effectivePermission === 'edit';
+  const { data: inviteData, loading: invitesLoading, refetch: refetchInvites } = useAsync(
+    () => isOwner ? api.invites.list(docId) : Promise.resolve({ invites: [] as ShareInvite[] }),
+    [docId, isOwner]
+  );
+  const invites = inviteData?.invites || [];
+
+  const handleCreateInvite = async (event: React.FormEvent) => {
+    event.preventDefault();
+    setCreatingInvite(true);
+    setIssuedInviteLink(null);
+    try {
+      const result = await api.invites.create(docId, recipientEmail.trim(), invitePermission, inviteExpiry);
+      const loginUrl = new URL(window.location.pathname, window.location.origin);
+      loginUrl.hash = `/login?invite=${encodeURIComponent(result.rawToken)}`;
+      setIssuedInviteLink(loginUrl.toString());
+      setRecipientEmail('');
+      addToast('Invitation created. Copy and send the link to the invited address.', 'success');
+      refetchInvites();
+    } catch (err) {
+      addToast(err instanceof Error ? err.message : 'Could not create invitation.', 'error');
+    } finally {
+      setCreatingInvite(false);
+    }
+  };
+
+  const handleRevokeInvite = async (invite: ShareInvite) => {
+    if (!confirm(`Revoke the invitation for ${invite.email}?`)) return;
+    try {
+      await api.invites.revoke(docId, invite.id);
+      addToast('Invitation revoked.', 'success');
+      refetchInvites();
+    } catch (err) {
+      addToast(err instanceof Error ? err.message : 'Could not revoke invitation.', 'error');
+    }
+  };
+
+  const copyInviteLink = async () => {
+    if (!issuedInviteLink) return;
+    try {
+      await navigator.clipboard.writeText(issuedInviteLink);
+      addToast('Invitation link copied.', 'success');
+    } catch {
+      addToast('Clipboard access is unavailable. Select and copy the link.', 'warning');
+    }
+  };
+
+  const copyAccessRequestLink = async () => {
+    const requestUrl = new URL(window.location.pathname, window.location.origin);
+    requestUrl.hash = `/login?request=${encodeURIComponent(docId)}`;
+    setIssuedAccessRequestLink(requestUrl.toString());
+    try {
+      await navigator.clipboard.writeText(requestUrl.toString());
+      addToast('Request link copied. Share it with the viewer so they can ask you for access.', 'success');
+    } catch {
+      addToast('The request link is shown below. Select and copy it to share.', 'warning');
+    }
+  };
 
   const handleDownload = async () => {
     try {
@@ -689,6 +786,47 @@ function DocumentDetailView({ docId, onBack }: { docId: string; onBack: () => vo
       window.location.href = `${API_BASE_URL}/documents/${docId}/download?ticket=${encodeURIComponent(rawTicket)}`;
     } catch (err) {
       addToast(err instanceof Error ? err.message : 'Download failed', 'error');
+    }
+  };
+
+  const handleVersionUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const input = event.currentTarget;
+    const file = input.files?.[0];
+    if (!file) return;
+    setUploadingVersion(true);
+    const formData = new FormData();
+    formData.append('file', file);
+    try {
+      const result = await api.documents.addVersion(docId, formData);
+      addToast(`Version ${result.version.versionNumber} uploaded successfully.`, 'success');
+      await refetchDocument();
+    } catch (err) {
+      addToast(err instanceof Error ? err.message : 'Could not upload this version.', 'error');
+    } finally {
+      input.value = '';
+      setUploadingVersion(false);
+    }
+  };
+
+  const copyVersionHash = async (hash: string) => {
+    try {
+      await navigator.clipboard.writeText(hash);
+      addToast('SHA-256 checksum copied.', 'success');
+    } catch {
+      addToast('Clipboard access is unavailable. Select the checksum to copy it.', 'warning');
+    }
+  };
+
+  const handleRequestEditAccess = async () => {
+    setRequestingEditAccess(true);
+    try {
+      const result = await api.accessRequests.submit(docId, 'edit');
+      addToast(result.message, 'info');
+      await refetchMyRequests();
+    } catch (err) {
+      addToast(err instanceof Error ? err.message : 'Could not submit the access request.', 'error');
+    } finally {
+      setRequestingEditAccess(false);
     }
   };
 
@@ -763,100 +901,102 @@ function DocumentDetailView({ docId, onBack }: { docId: string; onBack: () => vo
   );
 
   return (
-    <div className="space-y-6 animate-fade-in">
+    <div className="document-detail-page space-y-6 animate-fade-in">
       {/* Breadcrumb */}
-      <div className="flex items-center gap-2 text-sm">
+      <div className="document-detail-breadcrumb flex items-center gap-2 text-sm">
         <button className="btn-vault-ghost text-xs py-1 px-2.5" onClick={onBack}>
           ← Documents Enclave
         </button>
         <ChevronRight size={14} className="text-slate-600" />
-        <span className="text-white font-medium">{doc.title}</span>
+        <span className="document-detail-breadcrumb-title text-white font-medium" title={doc.title}>{doc.title}</span>
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
+      <div className="document-detail-layout grid grid-cols-1 xl:grid-cols-12 gap-6 items-start">
         {/* Left column */}
-        <div className="lg:col-span-7 space-y-6">
+        <div className="document-detail-main xl:col-span-7 space-y-6">
           {/* Document header card */}
           <div className="vault-card p-6">
-            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-6 pb-6 border-b border-slate-800">
+            <div className="document-detail-header flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-6 pb-6 border-b border-slate-800">
               <div className="flex items-start gap-3.5">
                 <div className="p-3 rounded-xl bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 shrink-0">
                   <FileText size={22} />
                 </div>
-                <div>
-                  <h2 className="text-xl font-display font-bold text-white">{doc.title}</h2>
-                  <p className="text-slate-400 text-xs mt-1">{doc.description || 'Encrypted document ciphertext in zero-trust enclave.'}</p>
+                <div className="document-detail-heading min-w-0">
+                  <h2 className="document-detail-title text-xl font-display font-bold text-white">{doc.title}</h2>
+                  <p className="document-detail-description text-slate-400 text-xs mt-1">{doc.description || 'Encrypted document ciphertext in zero-trust enclave.'}</p>
                 </div>
               </div>
-              <div>
+              <div className="document-detail-actions flex flex-wrap items-center gap-2">
+                {user?.role === 'viewer' && doc.effectivePermission === 'read' && (
+                  <button className="btn-vault-secondary text-xs py-2 px-3" onClick={handleRequestEditAccess} disabled={requestingEditAccess || editRequestPending}>
+                    {requestingEditAccess ? <><RefreshCw size={13} className="animate-spin" /> Sending…</> : editRequestPending ? <><Clock size={13} /> Request pending</> : <><Key size={13} /> Request edit access</>}
+                  </button>
+                )}
+                {isOwner && <button className="btn-vault-secondary text-xs py-2 px-3" onClick={copyAccessRequestLink}><Copy size={13} /> Copy request link</button>}
+                {canUploadVersion && <>
+                  <input ref={versionInputRef} className="document-version-file-input" type="file" accept=".pdf,.docx,.xlsx,.pptx,.txt,.csv,.png,.jpg,.jpeg" onChange={handleVersionUpload} aria-label="Choose a file for the new document version" />
+                  <button className="btn-vault-secondary text-xs py-2 px-3" type="button" onClick={() => versionInputRef.current?.click()} disabled={uploadingVersion}>
+                    {uploadingVersion ? <><RefreshCw size={13} className="animate-spin" /> Uploading…</> : <><Upload size={13} /> New version</>}
+                  </button>
+                </>}
                 <button className="btn-vault-primary text-xs py-2 px-4 shadow-md shadow-emerald-950/40" onClick={handleDownload} id="btn-download">
-                  <Download size={14} /> Download Secure Ticket
+                  <Download size={14} /> Download latest version
                 </button>
               </div>
             </div>
 
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-              <div className="p-3.5 rounded-xl bg-slate-900/60 border border-slate-800">
+            {isOwner && issuedAccessRequestLink && <div className="mb-5 rounded-lg border border-emerald-500/25 bg-emerald-500/5 p-3">
+              <label htmlFor="document-access-request-link" className="block text-[10px] uppercase tracking-wider text-emerald-400 mb-2">Viewer request link · access is not granted until you approve</label>
+              <div className="flex gap-2"><input id="document-access-request-link" readOnly value={issuedAccessRequestLink} className="vault-input min-w-0 flex-1 text-xs" onFocus={(event) => event.currentTarget.select()} /><button className="btn-vault-secondary px-2" type="button" onClick={copyAccessRequestLink} aria-label="Copy viewer request link"><Copy size={14} /></button></div>
+            </div>}
+
+            <div className="document-meta-grid grid grid-cols-1 sm:grid-cols-3 gap-4">
+              <div className="document-meta-item p-3.5 rounded-xl bg-slate-900/60 border border-slate-800">
                 <p className="text-[10px] font-mono uppercase tracking-wider text-slate-500 mb-1">Category</p>
                 <span className="vault-badge vault-badge-slate">{doc.category}</span>
               </div>
-              <div className="p-3.5 rounded-xl bg-slate-900/60 border border-slate-800">
+              <div className="document-meta-item p-3.5 rounded-xl bg-slate-900/60 border border-slate-800">
                 <p className="text-[10px] font-mono uppercase tracking-wider text-slate-500 mb-1">Your Permission</p>
                 <StatusBadge status={doc.effectivePermission || 'read'} />
               </div>
-              <div className="p-3.5 rounded-xl bg-slate-900/60 border border-slate-800">
-                <p className="text-[10px] font-mono uppercase tracking-wider text-slate-500 mb-1">Owner Enclave</p>
-                <p className="text-xs font-mono text-slate-300 truncate">{doc.ownerEmail}</p>
+              <div className="document-meta-item p-3.5 rounded-xl bg-slate-900/60 border border-slate-800">
+                <p className="text-[10px] font-mono uppercase tracking-wider text-slate-500 mb-1">Document owner</p>
+                <p className="text-xs font-semibold text-slate-200 truncate">{doc.ownerName || doc.ownerEmail}</p>
+                {doc.ownerName && <p className="text-[10px] font-mono text-slate-400 truncate">{doc.ownerEmail}</p>}
               </div>
             </div>
           </div>
 
           {/* Version history */}
           <div className="vault-card p-6">
-            <div className="flex items-center justify-between mb-4">
-              <h3 className="font-display font-bold text-white text-base">Version History & Recovery</h3>
-              {isOwner && (
-                <span className="text-[11px] font-mono text-emerald-400">Append-only ciphertext</span>
-              )}
+            <div className="document-section-heading flex items-center justify-between mb-4">
+              <div><h3 className="font-display font-bold text-white text-base">Version history</h3><p className="text-xs text-slate-400 mt-1">{versions.length} version{versions.length === 1 ? '' : 's'} · newest first</p>{canUploadVersion && <p className="document-version-help">PDF, Office, text, CSV, and image files · up to 15 MB</p>}</div>
+              <span className="document-encryption-label"><ShieldCheck size={13} /> Encrypted at rest</span>
             </div>
             {versions.length === 0 ? (
-              <p className="text-slate-500 text-xs py-4 text-center">No versions recorded.</p>
+              <div className="empty-state py-8"><div className="empty-state-icon"><FileText size={22} /></div><h3>No versions yet</h3><p>Uploaded document versions will be listed here.</p></div>
             ) : (
-              <div className="table-container border-0 bg-transparent shadow-none">
-                <table className="table" aria-label="Version history">
-                  <thead>
-                    <tr>
-                      <th>Version</th>
-                      <th>Filename</th>
-                      <th>Size</th>
-                      <th>MIME Type</th>
-                      <th>Encrypted At</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {versions.map((v) => (
-                      <tr key={v.id}>
-                        <td><span className="vault-badge vault-badge-emerald">v{v.versionNumber}</span></td>
-                        <td className="text-white text-xs font-mono">{v.originalFilename}</td>
-                        <td className="text-slate-400 text-xs font-mono">{formatBytes(v.fileSize)}</td>
-                        <td><span className="vault-badge vault-badge-slate text-[10px]">{v.mimeType}</span></td>
-                        <td className="text-slate-400 text-xs font-mono">{formatDate(v.createdAt)}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
+              <div className="document-version-list" aria-label="Document versions">
+                {versions.map((version, index) => (
+                  <article className="document-version-card" key={version.id}>
+                    <div className="document-version-top"><div className="flex items-center gap-2"><span className="vault-badge vault-badge-emerald">v{version.versionNumber}</span>{index === 0 && <span className="document-current-badge">CURRENT</span>}</div><time>{formatDate(version.createdAt)}</time></div>
+                    <h4 className="document-version-filename" title={version.originalFilename}>{version.originalFilename}</h4>
+                    <div className="document-version-facts"><span>{formatBytes(version.fileSize)}</span><span>{version.mimeType}</span></div>
+                    <details className="document-version-integrity"><summary>SHA-256 integrity checksum</summary><div><code>{version.sha256Hash}</code><button type="button" className="btn-vault-secondary" onClick={() => copyVersionHash(version.sha256Hash)}><Copy size={12} /> Copy</button></div></details>
+                  </article>
+                ))}
               </div>
             )}
           </div>
         </div>
 
         {/* Right column — Who can see this */}
-        <div className="lg:col-span-5 space-y-5">
+        <div className="document-detail-aside xl:col-span-5 space-y-5">
           <div className="vault-card p-6 border-emerald-500/25 shadow-xl shadow-black/60 relative">
             <div className="flex items-center justify-between mb-4 pb-3 border-b border-slate-800">
               <h3 className="font-display font-bold text-white text-base flex items-center gap-2">
                 <ShieldCheck size={18} className="text-emerald-400" />
-                <span>Who Can See This?</span>
+                <span>Access & permissions</span>
               </h3>
               {isOwner && (
                 <button className="btn-vault-secondary text-xs py-1.5 px-3" onClick={() => setShowGrantModal(true)} id="btn-grant">
@@ -865,15 +1005,20 @@ function DocumentDetailView({ docId, onBack }: { docId: string; onBack: () => vo
               )}
             </div>
 
+            <div className="document-access-summary">
+              <span className="document-access-summary-icon"><Lock size={14} /></span>
+              <p>{isOwner ? grantsLoading ? 'Loading current grants…' : `${activeGrantCount} active grant${activeGrantCount === 1 ? '' : 's'}${expiredGrantCount ? ` · ${expiredGrantCount} expired` : ''}. Only you can view or change this list.` : 'Your access is limited to the permission shown on this page. Grant details are visible only to the document owner.'}</p>
+            </div>
+
             <div className="space-y-3">
               {/* Owner row */}
               <div className="grant-row">
                 <div className="user-avatar text-xs shrink-0">
-                  {(doc.ownerEmail || '').slice(0, 2).toUpperCase()}
+                  {(doc.ownerName || doc.ownerEmail || '').slice(0, 2).toUpperCase()}
                 </div>
                 <div className="flex-1 min-w-0">
-                  <p className="text-xs font-semibold text-white truncate font-mono">{doc.ownerEmail}</p>
-                  <p className="text-[11px] text-slate-400">Document Owner — Full Control</p>
+                  <p className="text-xs font-semibold text-white truncate">{isOwner ? 'You' : doc.ownerName || doc.ownerEmail}</p>
+                  <p className="text-[11px] text-slate-400 truncate">{doc.ownerEmail} · Full control</p>
                 </div>
                 <span className="vault-badge vault-badge-emerald">OWNER</span>
               </div>
@@ -884,35 +1029,21 @@ function DocumentDetailView({ docId, onBack }: { docId: string; onBack: () => vo
                 ))
               ) : grants.length === 0 ? (
                 <p className="text-muted text-sm" style={{ textAlign: 'center', padding: 'var(--space-4)' }}>
-                  Nobody else — not even admins.
+                  {isOwner ? 'Nobody else — not even administrators.' : 'Grant details are visible to the document owner.'}
                 </p>
               ) : (
-                grants.map((g) => (
-                  <div key={g.id} className="grant-row">
-                    <div className="user-avatar" style={{ width: 28, height: 28, fontSize: '0.65rem' }}>
-                      {g.userEmail.slice(0, 2).toUpperCase()}
-                    </div>
+                grants.map((g) => {
+                  const expired = Boolean(g.expiresAt && new Date(g.expiresAt).getTime() <= Date.now());
+                  return <div key={g.id} className={`grant-row ${expired ? 'document-grant-expired' : ''}`}>
+                    <div className="user-avatar" style={{ width: 28, height: 28, fontSize: '0.65rem' }}>{g.userEmail.slice(0, 2).toUpperCase()}</div>
                     <div className="flex-1 min-w-0">
                       <p className="text-sm font-semibold truncate" style={{ color: 'var(--color-text-primary)' }}>{g.userEmail}</p>
-                      {g.expiresAt && (
-                        <p className="text-xs text-muted">
-                          <Clock size={10} style={{ display: 'inline' }} /> Expires {formatDate(g.expiresAt)}
-                        </p>
-                      )}
+                      {g.expiresAt && <p className="text-xs text-muted"><Clock size={10} style={{ display: 'inline' }} /> {expired ? 'Expired' : 'Expires'} {formatDate(g.expiresAt)}</p>}
                     </div>
-                    <StatusBadge status={g.permission} />
-                    {isOwner && (
-                      <button
-                        className="btn btn-ghost btn-icon btn-sm"
-                        onClick={() => handleRevokeGrant(g.userId, g.userEmail)}
-                        title={`Revoke access for ${g.userEmail}`}
-                        aria-label={`Revoke access for ${g.userEmail}`}
-                      >
-                        <X size={12} />
-                      </button>
-                    )}
-                  </div>
-                ))
+                    {expired ? <span className="document-expired-badge">EXPIRED</span> : <StatusBadge status={g.permission} />}
+                    {isOwner && <button className="btn btn-ghost btn-icon btn-sm" onClick={() => handleRevokeGrant(g.userId, g.userEmail)} title={`Revoke access for ${g.userEmail}`} aria-label={`Revoke access for ${g.userEmail}`}><X size={12} /></button>}
+                  </div>;
+                })
               )}
 
               {isOwner && grants.length > 0 && (
@@ -939,6 +1070,57 @@ function DocumentDetailView({ docId, onBack }: { docId: string; onBack: () => vo
               )}
             </div>
           </div>
+
+          {isOwner && (
+            <div className="vault-card p-5">
+              <div className="flex items-center justify-between mb-3">
+                <h3 className="font-display font-bold text-white text-base">Share invitation</h3>
+                <span className="text-[10px] font-mono text-slate-500">RECIPIENT-BOUND</span>
+              </div>
+              <p className="text-xs text-slate-400 mb-4">Create a time-limited link for a specific email. The recipient must have a workspace account and sign in with that address to accept.</p>
+              <form onSubmit={handleCreateInvite} className="space-y-3">
+                <label className="block text-xs text-slate-400" htmlFor="invite-recipient">Recipient email</label>
+                <input id="invite-recipient" type="email" required value={recipientEmail} onChange={(event) => setRecipientEmail(event.target.value)} className="vault-input w-full text-sm" placeholder="person@company.com" />
+                <div className="grid grid-cols-2 gap-2">
+                  <label className="block text-xs text-slate-400">Permission
+                    <select value={invitePermission} onChange={(event) => setInvitePermission(event.target.value as 'read' | 'edit')} className="vault-input w-full mt-1 text-xs">
+                      <option value="read">Read</option><option value="edit">Edit</option>
+                    </select>
+                  </label>
+                  <label className="block text-xs text-slate-400">Expires in
+                    <select value={inviteExpiry} onChange={(event) => setInviteExpiry(Number(event.target.value))} className="vault-input w-full mt-1 text-xs">
+                      <option value={24}>24 hours</option><option value={72}>3 days</option><option value={168}>7 days</option><option value={720}>30 days</option>
+                    </select>
+                  </label>
+                </div>
+                <button className="btn-vault-secondary w-full justify-center text-xs py-2" type="submit" disabled={creatingInvite}>
+                  {creatingInvite ? <><RefreshCw size={13} className="animate-spin" /> Creating…</> : <><Plus size={13} /> Create invitation link</>}
+                </button>
+              </form>
+              {issuedInviteLink && (
+                <div className="mt-3 rounded-lg border border-emerald-500/25 bg-emerald-500/5 p-3">
+                  <label htmlFor="new-invite-link" className="block text-[10px] uppercase tracking-wider text-emerald-400 mb-2">Copy this link now</label>
+                  <div className="flex gap-2">
+                    <input id="new-invite-link" readOnly value={issuedInviteLink} className="vault-input min-w-0 flex-1 text-[10px]" onFocus={(event) => event.currentTarget.select()} />
+                    <button className="btn-vault-secondary px-2" type="button" onClick={copyInviteLink} aria-label="Copy invitation link"><Copy size={14} /></button>
+                  </div>
+                  <p className="text-[10px] text-slate-500 mt-2">This secret is only shown once. Revoke the invitation if the link is lost or shared incorrectly.</p>
+                </div>
+              )}
+              <div className="mt-4 space-y-2">
+                <div className="flex items-center justify-between"><span className="text-[10px] font-mono uppercase tracking-wider text-slate-500">Recent invitations</span><button type="button" onClick={refetchInvites} className="text-[10px] text-slate-400 hover:text-white">Refresh</button></div>
+                {invitesLoading ? <div className="skeleton h-10 w-full" /> : invites.length === 0 ? <p className="text-xs text-slate-500">No invitations created.</p> : invites.map((invite) => {
+                  const expired = new Date(invite.expiresAt).getTime() <= Date.now();
+                  const active = !invite.revokedAt && !invite.usedAt && !expired;
+                  return <div key={invite.id} className="flex items-center gap-2 rounded-lg bg-slate-900/60 border border-slate-800 px-3 py-2">
+                    <span className="min-w-0 flex-1 truncate text-xs text-slate-300">{invite.email}<small className="block text-[10px] text-slate-500">{invite.permission} · expires {formatDate(invite.expiresAt)}</small></span>
+                    <StatusBadge status={invite.revokedAt ? 'denied' : invite.usedAt ? 'approved' : expired ? 'disabled' : 'pending'} />
+                    {active && <button type="button" className="btn btn-ghost btn-icon btn-sm" onClick={() => handleRevokeInvite(invite)} aria-label={`Revoke invitation for ${invite.email}`}><X size={12} /></button>}
+                  </div>;
+                })}
+              </div>
+            </div>
+          )}
 
           {/* AI Suggestions panel */}
           {showSuggestions && suggestions.length > 0 && (
@@ -1256,9 +1438,24 @@ function UploadView({ onUploaded }: { onUploaded: () => void }) {
 
 function UsersView() {
   const addToast = useToast();
-  const { data, loading, refetch } = useAsync(() => api.admin.listUsers(), []);
+  const { data, loading, error, refetch } = useAsync(() => api.admin.listUsers(), []);
   const users = data?.users || [];
   const [showCreate, setShowCreate] = useState(false);
+  const [search, setSearch] = useState('');
+  const [roleFilter, setRoleFilter] = useState('');
+  const [statusFilter, setStatusFilter] = useState('');
+  const [activityUser, setActivityUser] = useState<{ id: string; name: string; email: string } | null>(null);
+  const visibleUsers = users.filter((user) => {
+    const matchesSearch = `${user.name} ${user.email}`.toLowerCase().includes(search.trim().toLowerCase());
+    const matchesRole = !roleFilter || user.role === roleFilter;
+    const isLocked = Boolean(user.lockedUntil && new Date(user.lockedUntil) > new Date());
+    const status = user.isDisabled ? 'disabled' : isLocked ? 'locked' : 'active';
+    return matchesSearch && matchesRole && (!statusFilter || status === statusFilter);
+  });
+  const { data: activityData, loading: activityLoading, error: activityError } = useAsync(
+    () => activityUser ? api.admin.activityUser(activityUser.id) : Promise.resolve(null),
+    [activityUser?.id]
+  );
 
   const handleDisable = async (userId: string, email: string, disable: boolean) => {
     if (!confirm(`${disable ? 'Disable' : 'Enable'} ${email}?`)) return;
@@ -1297,7 +1494,7 @@ function UsersView() {
       <div className="flex items-center justify-between mb-6">
         <div>
           <h2 style={{ fontSize: '1.5rem', fontWeight: 800, letterSpacing: '-0.02em' }}>Manage Users</h2>
-          <p className="text-muted text-sm mt-1">{users.length} users in your organization</p>
+          <p className="text-muted text-sm mt-1">Showing {visibleUsers.length} of {users.length} organization users</p>
         </div>
         <div className="flex gap-3">
           <button className="btn btn-ghost btn-icon" onClick={refetch} aria-label="Refresh users">
@@ -1308,6 +1505,18 @@ function UsersView() {
           </button>
         </div>
       </div>
+
+      <div className="flex flex-wrap items-center gap-3 mb-4">
+        <label className="relative flex-1" style={{ minWidth: 220, maxWidth: 420 }}>
+          <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500" aria-hidden />
+          <input className="form-input" style={{ paddingLeft: 36 }} value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search name or email" aria-label="Search users" />
+        </label>
+        <label className="flex items-center gap-2 text-xs text-slate-400">Role<select className="form-select" value={roleFilter} onChange={(event) => setRoleFilter(event.target.value)} aria-label="Filter users by role"><option value="">All roles</option><option value="viewer">Viewers</option><option value="owner">Owners</option><option value="admin">Admins</option></select></label>
+        <label className="flex items-center gap-2 text-xs text-slate-400">Status<select className="form-select" value={statusFilter} onChange={(event) => setStatusFilter(event.target.value)} aria-label="Filter users by status"><option value="">All statuses</option><option value="active">Active</option><option value="locked">Locked</option><option value="disabled">Disabled</option></select></label>
+        {(search || roleFilter || statusFilter) && <button type="button" className="btn btn-ghost btn-sm" onClick={() => { setSearch(''); setRoleFilter(''); setStatusFilter(''); }}>Clear filters</button>}
+      </div>
+
+      {error && <div className="alert alert-danger mb-4" role="alert"><XCircle size={15} />{error}<button className="btn btn-ghost btn-sm" onClick={refetch}>Retry</button></div>}
 
       {loading ? (
         <div className="table-container">
@@ -1329,7 +1538,7 @@ function UsersView() {
               </tr>
             </thead>
             <tbody>
-              {users.map((u) => (
+              {visibleUsers.map((u) => (
                 <tr key={u.id}>
                   <td className="text-primary">{u.name}</td>
                   <td className="text-muted text-sm" style={{ fontFamily: 'var(--font-mono)', fontSize: '0.8rem' }}>{u.email}</td>
@@ -1358,6 +1567,9 @@ function UsersView() {
                       <button className="btn btn-ghost btn-sm" onClick={() => handleForceLogout(u.id, u.email)}>
                         <LogOut size={12} />
                       </button>
+                      <button className="btn btn-ghost btn-sm" onClick={() => setActivityUser({ id: u.id, name: u.name, email: u.email })} title={`View activity for ${u.email}`}>
+                        <Activity size={12} /> Activity
+                      </button>
                       {u.lockedUntil && new Date(u.lockedUntil) > new Date() && (
                         <button className="btn btn-ghost btn-sm" onClick={() => handleUnlock(u.id, u.email)}>
                           <Unlock size={12} />
@@ -1367,12 +1579,39 @@ function UsersView() {
                   </td>
                 </tr>
               ))}
+              {!visibleUsers.length && <tr><td colSpan={6} className="text-muted text-sm" style={{ textAlign: 'center', padding: '2rem' }}>{users.length ? 'No users match these filters.' : 'No users are available.'}</td></tr>}
             </tbody>
           </table>
         </div>
       )}
 
       {showCreate && <CreateUserModal onClose={() => setShowCreate(false)} onCreated={() => { refetch(); setShowCreate(false); }} />}
+      {activityUser && (
+        <div className="modal-overlay" role="dialog" aria-modal aria-labelledby="user-activity-title" onMouseDown={(event) => { if (event.target === event.currentTarget) setActivityUser(null); }}>
+          <div className="modal" style={{ width: 'min(760px, calc(100vw - 32px))' }}>
+            <div className="modal-header">
+              <div><h3 className="modal-title" id="user-activity-title">User activity</h3><p className="text-muted text-xs mt-1">{activityUser.name} · {activityUser.email}</p></div>
+              <button className="btn btn-ghost btn-icon" onClick={() => setActivityUser(null)} aria-label="Close user activity"><X size={16} /></button>
+            </div>
+            <div className="modal-body">
+              {activityLoading ? <div className="skeleton h-24 w-full" /> : activityError ? <div className="alert alert-danger"><XCircle size={14} />{activityError}</div> : activityData?.events.length ? (
+                <div className="table-container">
+                  <table className="table" aria-label="User activity events">
+                    <thead><tr><th>When</th><th>Event</th><th>Action</th><th>Result</th><th>Details</th></tr></thead>
+                    <tbody>{activityData.events.map((event) => <tr key={event.id}>
+                      <td className="text-muted text-xs">{formatDate(event.created_at)}</td>
+                      <td className="text-xs">{event.event_type}</td>
+                      <td className="text-xs">{event.action}</td>
+                      <td><StatusBadge status={event.status} /></td>
+                      <td className="text-muted text-xs">{event.reason || event.target_id || '—'}</td>
+                    </tr>)}</tbody>
+                  </table>
+                </div>
+              ) : <div className="empty-state py-8"><div className="empty-state-icon"><Activity size={24} /></div><h3>No recorded activity</h3><p>Activity for this user will appear here.</p></div>}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -1410,11 +1649,13 @@ function CreateUserModal({ onClose, onCreated }: { onClose: () => void; onCreate
             <div className="form-group">
               <label className="form-label" htmlFor="new-user-email">Email</label>
               <input id="new-user-email" type="email" className="form-input" required
+                autoComplete="username"
                 value={form.email} onChange={(e) => setForm((f) => ({ ...f, email: e.target.value }))} />
             </div>
             <div className="form-group">
               <label className="form-label" htmlFor="new-user-name">Full Name</label>
               <input id="new-user-name" className="form-input" required minLength={2}
+                autoComplete="name"
                 value={form.name} onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))} />
             </div>
             <div className="form-group">
@@ -1429,6 +1670,7 @@ function CreateUserModal({ onClose, onCreated }: { onClose: () => void; onCreate
             <div className="form-group">
               <label className="form-label" htmlFor="new-user-password">Initial Password</label>
               <input id="new-user-password" type="password" className="form-input" required minLength={8}
+                autoComplete="new-password"
                 value={form.initialPassword} onChange={(e) => setForm((f) => ({ ...f, initialPassword: e.target.value }))} />
             </div>
             {error && <div className="alert alert-danger"><XCircle size={14} />{error}</div>}
@@ -1452,13 +1694,14 @@ function CreateUserModal({ onClose, onCreated }: { onClose: () => void; onCreate
 function AuditView() {
   const addToast = useToast();
   const [statusFilter, setStatusFilter] = useState('');
+  const [eventTypeFilter, setEventTypeFilter] = useState('');
   const [page, setPage] = useState(1);
   const [verifying, setVerifying] = useState(false);
   const [verifyResult, setVerifyResult] = useState<{ isValid: boolean; totalRecords: number; message: string } | null>(null);
 
   const { data, loading, refetch } = useAsync(
-    () => api.admin.audit({ page: String(page), pageSize: '50', ...(statusFilter ? { status: statusFilter } : {}) }),
-    [page, statusFilter]
+    () => api.admin.audit({ page: String(page), pageSize: '50', ...(statusFilter ? { status: statusFilter } : {}), ...(eventTypeFilter ? { eventType: eventTypeFilter } : {}) }),
+    [page, statusFilter, eventTypeFilter]
   );
 
   const events = data?.events || [];
@@ -1479,7 +1722,7 @@ function AuditView() {
 
   const handleExport = async () => {
     try {
-      await api.admin.exportCsv();
+      await api.admin.exportCsv({ ...(statusFilter ? { status: statusFilter } : {}), ...(eventTypeFilter ? { eventType: eventTypeFilter } : {}) });
       addToast('CSV export downloaded.', 'success');
     } catch {
       addToast('Export failed.', 'error');
@@ -1494,6 +1737,19 @@ function AuditView() {
           <p className="text-muted text-sm mt-1">Tamper-evident hash-chained record of all events</p>
         </div>
         <div className="flex gap-3" style={{ flexWrap: 'wrap' }}>
+          <select className="form-select" style={{ width: 175 }} value={eventTypeFilter}
+            onChange={(e) => { setEventTypeFilter(e.target.value); setPage(1); }}
+            id="audit-event-type-filter" aria-label="Filter by event type">
+            <option value="">All event types</option>
+            <option value="ACCESS_REQUEST">Access requests</option>
+            <option value="ACCESS_DENIED">Access denials</option>
+            <option value="AUTH_LOGIN">Sign-in activity</option>
+            <option value="DOCUMENT_LIFECYCLE">Document activity</option>
+            <option value="GRANT_LIFECYCLE">Permission grants</option>
+            <option value="SHARE_LINK">Share links</option>
+            <option value="USER_ADMIN">User administration</option>
+            <option value="SECURITY_ALERT">Security alerts</option>
+          </select>
           <select className="form-select" style={{ width: 140 }} value={statusFilter}
             onChange={(e) => { setStatusFilter(e.target.value); setPage(1); }}
             id="audit-status-filter" aria-label="Filter by status">
@@ -1593,11 +1849,15 @@ function DashboardView({ user, onNavigate }: { user: User; onNavigate: (view: Vi
     user.role === 'admin' ? api.admin.dashboard() : Promise.resolve(null), [user.role]);
   const { data: accessRequestsData } = useAsync(() =>
     user.role === 'owner' ? api.accessRequests.listPending() : Promise.resolve(null), [user.role]);
+  const { data: myRequestsData } = useAsync(() =>
+    user.role === 'viewer' ? api.accessRequests.listMine() : Promise.resolve(null), [user.role]);
   const { data: chainData } = useAsync(() =>
     user.role === 'admin' ? api.admin.verifyChain() : Promise.resolve(null), [user.role]);
 
   const docs = docsData?.documents || [];
   const pendingRequests = accessRequestsData?.requests || [];
+  const myRequests = myRequestsData?.requests || [];
+  const myPendingRequests = myRequests.filter((request) => request.status === 'pending');
   const alerts = dashData?.alerts;
   const totalAlerts = alerts ? Object.values(alerts).reduce((sum, arr) => sum + arr.length, 0) : 0;
   const firstName = user.name.split(' ')[0];
@@ -1609,12 +1869,12 @@ function DashboardView({ user, onNavigate }: { user: User; onNavigate: (view: Vi
     <div className="dashboard-page">
       <div className="dashboard-welcome">
         <div><div className="eyebrow"><span className="eyebrow-dot" /> {workspace.toUpperCase()} WORKSPACE <span className="welcome-separator">/</span> {user.role.toUpperCase()}</div><h1>{greeting}, {firstName}.</h1><p>Your documents, permissions, and security activity in one place.</p></div>
-        <div className="welcome-actions"><span className="welcome-date">{new Date().toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric' })}</span>{user.role === 'owner' && <button className="button button-accent" type="button" onClick={() => onNavigate('upload')}><Plus size={15} /> Add a document</button>}</div>
+        <div className="welcome-actions"><span className="welcome-date">{new Date().toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric' })}</span>{user.role === 'owner' && <><button className="button button-dark" type="button" onClick={() => onNavigate('access-requests')}><Key size={14} /> Requests{pendingRequests.length > 0 ? ` · ${pendingRequests.length}` : ''}</button><button className="button button-accent" type="button" onClick={() => onNavigate('upload')}><Plus size={15} /> Add a document</button></>}{user.role === 'viewer' && <button className="button button-accent" type="button" onClick={() => onNavigate('my-requests')}><Key size={14} /> My access requests</button>}</div>
       </div>
 
       <div className="dashboard-stats">
         <article className="stat-card"><div className="stat-top"><span>DOCUMENTS YOU CAN ACCESS</span><FileText size={17} /></div><strong>{docsLoading ? '—' : docs.length.toString().padStart(2, '0')}</strong><div className="stat-bottom"><span className="stat-pip" /> Scoped to your permissions</div></article>
-        <article className="stat-card"><div className="stat-top"><span>{user.role === 'owner' ? 'REQUESTS TO REVIEW' : user.role === 'admin' ? 'SECURITY SIGNALS' : 'WORKSPACE'}</span>{user.role === 'admin' ? <Activity size={17} /> : user.role === 'owner' ? <Key size={17} /> : <Database size={17} />}</div><strong>{user.role === 'owner' ? pendingRequests.length.toString().padStart(2, '0') : user.role === 'admin' ? (dashLoading ? '—' : totalAlerts.toString().padStart(2, '0')) : workspace.replace(/^./, (letter) => letter.toUpperCase())}</strong><div className="stat-bottom"><span className={`stat-pip ${user.role === 'admin' && totalAlerts > 0 || user.role === 'owner' && pendingRequests.length > 0 ? 'pip-warn' : ''}`} />{user.role === 'owner' ? 'Awaiting an owner decision' : user.role === 'admin' ? (totalAlerts ? 'Needs your attention' : 'No unusual activity detected') : 'Private by default'}</div></article>
+        <article className="stat-card"><div className="stat-top"><span>{user.role === 'owner' ? 'REQUESTS TO REVIEW' : user.role === 'admin' ? 'SECURITY SIGNALS' : 'MY ACCESS REQUESTS'}</span>{user.role === 'admin' ? <Activity size={17} /> : <Key size={17} />}</div><strong>{user.role === 'owner' ? pendingRequests.length.toString().padStart(2, '0') : user.role === 'admin' ? (dashLoading ? '—' : totalAlerts.toString().padStart(2, '0')) : myRequestsData ? myPendingRequests.length.toString().padStart(2, '0') : '—'}</strong><div className="stat-bottom"><span className={`stat-pip ${user.role === 'admin' && totalAlerts > 0 || user.role === 'owner' && pendingRequests.length > 0 || user.role === 'viewer' && myPendingRequests.length > 0 ? 'pip-warn' : ''}`} />{user.role === 'owner' ? 'Awaiting an owner decision' : user.role === 'admin' ? (totalAlerts ? 'Needs your attention' : 'No unusual activity detected') : `${myPendingRequests.length} awaiting review · ${myRequests.length - myPendingRequests.length} decided`}</div></article>
         <article className="stat-card stat-card-accent"><div className="stat-top"><span>ACCESS POLICY</span><ShieldCheck size={17} /></div><strong>Enforced</strong><div className="stat-bottom"><span className="stat-pip" /> Checked each time a file is opened</div></article>
       </div>
 
@@ -1638,6 +1898,8 @@ function DashboardView({ user, onNavigate }: { user: User; onNavigate: (view: Vi
 
       {user.role === 'owner' && pendingRequests.length > 0 && <section className="request-preview"><div className="panel-heading"><div><span className="panel-kicker">NEEDS YOUR DECISION</span><h2>Access requests <span className="request-count">{pendingRequests.length}</span></h2></div><button className="panel-link" type="button" onClick={() => onNavigate('access-requests')}>Review requests <ArrowRight size={14} /></button></div><div className="request-preview-row">{pendingRequests.slice(0, 3).map((request) => <div key={request.id}><span className="request-avatar">{request.requesterEmail.slice(0, 1).toUpperCase()}</span><span><strong>{request.requesterEmail}</strong><small>Requests {request.targetPermission} access to <b>{request.documentTitle || 'a document'}</b></small></span><span className="request-pending">PENDING</span></div>)}</div></section>}
 
+      {user.role === 'viewer' && myRequests.length > 0 && <section className="request-preview"><div className="panel-heading"><div><span className="panel-kicker">YOUR ACCESS ACTIVITY</span><h2>Request updates</h2></div><button className="panel-link" type="button" onClick={() => onNavigate('my-requests')}>Open history <ArrowRight size={14} /></button></div><div className="request-preview-row">{myRequests.slice(0, 3).map((request) => <div key={request.id}><span className="request-avatar"><FileText size={14} /></span><span><strong>{request.documentTitle}</strong><small>{request.targetPermission} · {request.status === 'pending' ? 'Waiting for owner review' : `Reviewed ${request.reviewedAt ? formatDate(request.reviewedAt) : formatDate(request.createdAt)}`}</small></span><StatusBadge status={request.status} /></div>)}</div></section>}
+
       {user.role === 'admin' && alerts && totalAlerts > 0 && <section className="dashboard-alerts"><div className="panel-heading"><div><span className="panel-kicker">ADMINISTRATOR REVIEW</span><h2>Security signals</h2></div><span className="alert-count">{totalAlerts} to review</span></div>{Object.entries(alerts).flatMap(([key, items]) => (items as any[]).map((item: any, index) => <div className="dashboard-alert-row" key={`${key}-${index}`}><AlertTriangle size={15} /><span><strong>{item.label}</strong><small>{item.actorEmail || 'Workspace activity'}{item.latestAt ? ` · ${formatDate(item.latestAt)}` : ''}</small></span><span>{key.replace(/([A-Z])/g, ' $1')}</span></div>))}</section>}
     </div>
   );
@@ -1648,70 +1910,251 @@ function DashboardView({ user, onNavigate }: { user: User; onNavigate: (view: Vi
 
 function AccessRequestsView() {
   const addToast = useToast();
-  const { data, loading, refetch } = useAsync(() => api.accessRequests.listPending(), []);
+  const { data, loading, error, refetch } = useAsync(() => api.accessRequests.listOwned(), []);
   const requests = data?.requests || [];
+  const [filter, setFilter] = useState<'all' | 'pending' | 'approved' | 'denied'>('pending');
+  const [search, setSearch] = useState('');
+  const [reviewDraft, setReviewDraft] = useState<{ request: AccessRequest; decision: 'approve' | 'deny' } | null>(null);
+  const [grantPermission, setGrantPermission] = useState<'read' | 'edit'>('read');
+  const [grantExpiry, setGrantExpiry] = useState<'never' | '1d' | '7d' | '30d'>('never');
+  const [reviewerNotes, setReviewerNotes] = useState('');
+  const [savingReview, setSavingReview] = useState(false);
 
-  const handleReview = async (reqId: string, decision: 'approve' | 'deny', permission: 'read' | 'edit' = 'read') => {
+  const counts = {
+    pending: requests.filter((request) => request.status === 'pending').length,
+    approved: requests.filter((request) => request.status === 'approved').length,
+    denied: requests.filter((request) => request.status === 'denied').length,
+  };
+  const visibleRequests = requests.filter((request) => {
+    const matchesStatus = filter === 'all' || request.status === filter;
+    const text = `${request.documentTitle} ${request.requesterName} ${request.requesterEmail} ${request.documentId}`.toLowerCase();
+    return matchesStatus && text.includes(search.trim().toLowerCase());
+  });
+
+  const openReview = (request: AccessRequest, decision: 'approve' | 'deny') => {
+    setReviewDraft({ request, decision });
+    setGrantPermission(request.targetPermission);
+    setGrantExpiry('never');
+    setReviewerNotes('');
+  };
+
+  const handleReview = async (event: React.FormEvent) => {
+    event.preventDefault();
+    if (!reviewDraft) return;
+    const expiryDurations: Record<Exclude<typeof grantExpiry, 'never'>, number> = {
+      '1d': 24 * 60 * 60 * 1000,
+      '7d': 7 * 24 * 60 * 60 * 1000,
+      '30d': 30 * 24 * 60 * 60 * 1000,
+    };
+    const expiresAt = grantExpiry === 'never' ? null : new Date(Date.now() + expiryDurations[grantExpiry]).toISOString();
+    setSavingReview(true);
     try {
-      await api.accessRequests.review(reqId, decision, permission);
-      addToast(`Request ${decision === 'approve' ? 'approved' : 'denied'}.`, decision === 'approve' ? 'success' : 'info');
-      refetch();
+      const result = await api.accessRequests.review(
+        reviewDraft.request.id,
+        reviewDraft.decision,
+        grantPermission,
+        expiresAt,
+        reviewerNotes.trim() || null
+      );
+      addToast(result.message, reviewDraft.decision === 'approve' ? 'success' : 'info');
+      setReviewDraft(null);
+      await refetch();
     } catch (err) {
-      addToast(err instanceof Error ? err.message : 'Failed', 'error');
+      addToast(err instanceof Error ? err.message : 'Could not record the decision.', 'error');
+    } finally {
+      setSavingReview(false);
     }
   };
 
   return (
-    <div>
-      <div className="flex items-center justify-between mb-6">
-        <div>
-          <h2 style={{ fontSize: '1.5rem', fontWeight: 800, letterSpacing: '-0.02em' }}>Access Requests</h2>
-          <p className="text-muted text-sm mt-1">Pending requests for documents you own</p>
-        </div>
-        <button className="btn btn-ghost btn-icon" onClick={refetch} aria-label="Refresh requests"><RefreshCw size={16} /></button>
+    <div className="access-request-page animate-fade-in">
+      <div className="access-request-header">
+        <div><span className="panel-kicker">OWNER WORKSPACE</span><h1>Access Requests</h1><p>Review requests for documents you own, set a grant scope, and keep a record of each decision.</p></div>
+        <button className="btn btn-ghost btn-icon" onClick={refetch} aria-label="Refresh access requests" title="Refresh"><RefreshCw size={16} /></button>
       </div>
 
-      {loading ? (
-        <div className="table-container">
-          <table className="table"><thead><tr><th>Document</th><th>Requester</th><th>Permission</th><th>Submitted</th><th /></tr></thead>
-            <tbody>{Array.from({ length: 3 }).map((_, i) => <SkeletonRow key={i} cols={5} />)}</tbody>
-          </table>
+      <div className="request-summary-grid" aria-label="Access request totals">
+        <article className="request-summary-card"><span>Awaiting decision</span><strong>{loading ? '—' : counts.pending}</strong><small>Requests still in your queue</small></article>
+        <article className="request-summary-card"><span>Approved</span><strong>{loading ? '—' : counts.approved}</strong><small>Access grants issued</small></article>
+        <article className="request-summary-card"><span>Denied</span><strong>{loading ? '—' : counts.denied}</strong><small>Decision history retained</small></article>
+      </div>
+
+      <section className="request-panel">
+        <div className="request-toolbar">
+          <div className="request-filter-buttons" role="tablist" aria-label="Filter access requests">
+            {(['pending', 'all', 'approved', 'denied'] as const).map((value) => (
+              <button key={value} type="button" role="tab" aria-selected={filter === value} className={filter === value ? 'selected' : ''} onClick={() => setFilter(value)}>
+                {value === 'all' ? 'All requests' : value[0].toUpperCase() + value.slice(1)}{value === 'pending' ? ` · ${counts.pending}` : ''}
+              </button>
+            ))}
+          </div>
+          <label className="request-search"><Search size={15} aria-hidden /><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search requester or document" aria-label="Search access requests" /></label>
         </div>
-      ) : requests.length === 0 ? (
-        <div className="empty-state">
-          <div className="empty-state-icon"><CheckCircle size={28} /></div>
-          <h3>No pending requests</h3>
-          <p>All access requests have been reviewed.</p>
-        </div>
-      ) : (
-        <div className="table-container">
-          <table className="table" aria-label="Access requests">
-            <thead>
-              <tr><th>Document</th><th>Requester</th><th>Permission</th><th>Submitted</th><th>Actions</th></tr>
-            </thead>
-            <tbody>
-              {requests.map((r) => (
-                <tr key={r.id}>
-                  <td className="text-primary text-sm">{r.documentId}</td>
-                  <td className="text-muted text-sm">{r.requesterEmail}</td>
-                  <td><StatusBadge status={r.targetPermission} /></td>
-                  <td className="text-muted text-sm">{formatDate(r.createdAt)}</td>
-                  <td>
-                    <div className="flex gap-2">
-                      <button className="btn btn-primary btn-sm" onClick={() => handleReview(r.id, 'approve', r.targetPermission)} id={`btn-approve-${r.id}`}>
-                        <CheckCircle size={12} /> Approve
-                      </button>
-                      <button className="btn btn-danger btn-sm" onClick={() => handleReview(r.id, 'deny')} id={`btn-deny-${r.id}`}>
-                        <XCircle size={12} /> Deny
-                      </button>
-                    </div>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+
+        {error && <div className="alert alert-danger" role="alert"><XCircle size={14} />{error}<button className="btn btn-ghost btn-sm" onClick={refetch}>Retry</button></div>}
+        {loading ? <div className="request-history-list">{Array.from({ length: 3 }).map((_, index) => <div className="skeleton h-20 w-full" key={index} />)}</div> : visibleRequests.length === 0 ? (
+          <div className="empty-state py-10"><div className="empty-state-icon"><CheckCircle size={26} /></div><h3>{requests.length === 0 ? 'No access requests yet' : 'No matching requests'}</h3><p>{requests.length === 0 ? 'Requests for your documents will appear here.' : 'Try another status or search term.'}</p></div>
+        ) : (
+          <div className="request-history-list">
+            {visibleRequests.map((request) => (
+              <article className="request-history-card" key={request.id}>
+                <div className="request-history-top">
+                  <span className="request-document-icon"><FileText size={17} /></span>
+                  <div className="request-history-title"><strong>{request.documentTitle}</strong><span>{request.requesterName} · {request.requesterEmail}</span></div>
+                  <StatusBadge status={request.status} />
+                </div>
+                <div className="request-history-meta"><span><Key size={13} /> Requests <b>{request.targetPermission}</b></span><span><Clock size={13} /> Sent {formatDate(request.createdAt)}</span>{request.reviewedAt && <span><CheckCircle size={13} /> Decided {formatDate(request.reviewedAt)}</span>}</div>
+                {request.status === 'pending' ? (
+                  <div className="request-history-actions">
+                    <button className="btn btn-primary btn-sm" onClick={() => openReview(request, 'approve')}><CheckCircle size={13} /> Review & approve</button>
+                    <button className="btn btn-danger btn-sm" onClick={() => openReview(request, 'deny')}><XCircle size={13} /> Deny</button>
+                  </div>
+                ) : (
+                  <div className="request-decision-note"><span>{request.reviewerName ? `Reviewed by ${request.reviewerName}` : 'Decision recorded'}</span>{request.reviewerNotes && <p>{request.reviewerNotes}</p>}{request.currentAccessStatus === 'active' && <small>Current grant: {request.currentGrantPermission}{request.currentGrantExpiresAt ? ` · expires ${formatDate(request.currentGrantExpiresAt)}` : ' · no expiry'}</small>}</div>
+                )}
+              </article>
+            ))}
+          </div>
+        )}
+      </section>
+
+      {reviewDraft && (
+        <div className="modal-overlay" role="dialog" aria-modal="true" aria-labelledby="access-review-title" onMouseDown={(event) => { if (event.target === event.currentTarget && !savingReview) setReviewDraft(null); }}>
+          <div className="modal">
+            <div className="modal-header"><div><h2 className="modal-title" id="access-review-title">{reviewDraft.decision === 'approve' ? 'Approve access request' : 'Deny access request'}</h2><p className="text-muted text-xs mt-1">{reviewDraft.request.documentTitle} · {reviewDraft.request.requesterEmail}</p></div><button className="btn btn-ghost btn-icon" type="button" onClick={() => setReviewDraft(null)} disabled={savingReview} aria-label="Close review"><X size={16} /></button></div>
+            <form onSubmit={handleReview}>
+              <div className="modal-body space-y-4">
+                {reviewDraft.decision === 'approve' && <>
+                  <label className="form-group"><span className="form-label">Grant permission</span><select className="form-select" value={grantPermission} onChange={(event) => setGrantPermission(event.target.value as 'read' | 'edit')}><option value="read">Read only</option><option value="edit">Read and edit</option></select></label>
+                  <label className="form-group"><span className="form-label">Grant expires</span><select className="form-select" value={grantExpiry} onChange={(event) => setGrantExpiry(event.target.value as typeof grantExpiry)}><option value="never">No expiry</option><option value="1d">In 24 hours</option><option value="7d">In 7 days</option><option value="30d">In 30 days</option></select></label>
+                </>}
+                <label className="form-group"><span className="form-label">Note to requester <span className="text-muted">(optional)</span></span><textarea className="form-input" maxLength={500} rows={3} value={reviewerNotes} onChange={(event) => setReviewerNotes(event.target.value)} placeholder={reviewDraft.decision === 'approve' ? 'Add context about this grant' : 'Explain what the requester can do next'} /></label>
+              </div>
+              <div className="modal-footer"><button type="button" className="btn btn-ghost" onClick={() => setReviewDraft(null)} disabled={savingReview}>Cancel</button><button type="submit" className={reviewDraft.decision === 'approve' ? 'btn btn-primary' : 'btn btn-danger'} disabled={savingReview}>{savingReview ? <><RefreshCw size={14} className="animate-spin" /> Saving…</> : reviewDraft.decision === 'approve' ? <><CheckCircle size={14} /> Issue grant</> : <><XCircle size={14} /> Record denial</>}</button></div>
+            </form>
+          </div>
         </div>
       )}
+    </div>
+  );
+}
+
+function MyAccessRequestsView({ onOpenDocument, initialDocumentId }: { onOpenDocument: (documentId: string) => void; initialDocumentId?: string | null }) {
+  const addToast = useToast();
+  const [documentReference, setDocumentReference] = useState(initialDocumentId || '');
+  const [permission, setPermission] = useState<'read' | 'edit'>('read');
+  const [submitting, setSubmitting] = useState(false);
+  const [formError, setFormError] = useState('');
+  const [filter, setFilter] = useState<'all' | 'pending' | 'approved' | 'denied'>('all');
+  const [search, setSearch] = useState('');
+  const [expandedRequest, setExpandedRequest] = useState<string | null>(null);
+  const { data, loading, error, refetch } = useAsync(() => api.accessRequests.listMine(), []);
+  const requests = data?.requests || [];
+  const pendingCount = requests.filter((request) => request.status === 'pending').length;
+  const approvedCount = requests.filter((request) => request.status === 'approved').length;
+  const deniedCount = requests.filter((request) => request.status === 'denied').length;
+  const visibleRequests = requests.filter((request) => {
+    const matchesStatus = filter === 'all' || request.status === filter;
+    const text = `${request.documentTitle} ${request.documentId} ${request.documentOwnerName || ''} ${request.documentOwnerEmail || ''}`.toLowerCase();
+    return matchesStatus && text.includes(search.trim().toLowerCase());
+  });
+
+  const submitRequest = async (event: React.FormEvent) => {
+    event.preventDefault();
+    const documentId = documentReference.match(/[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}/i)?.[0];
+    if (!documentId) {
+      setFormError('Enter a valid document UUID or a document link containing its UUID.');
+      return;
+    }
+    setSubmitting(true);
+    setFormError('');
+    try {
+      const result = await api.accessRequests.submit(documentId, permission);
+      addToast(result.message, 'success');
+      setDocumentReference('');
+      await refetch();
+    } catch (err) {
+      setFormError(err instanceof Error ? err.message : 'Could not submit the request.');
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  return (
+    <div className="access-request-page animate-fade-in">
+      <div className="access-request-header">
+        <div><span className="panel-kicker">VIEWER WORKSPACE</span><h1>My Access Requests</h1><p>Request permission, follow the owner’s decision, and see whether a grant is still active.</p></div>
+        <button className="btn btn-ghost btn-icon" onClick={refetch} aria-label="Refresh my access requests" title="Refresh"><RefreshCw size={16} /></button>
+      </div>
+
+      <div className="request-summary-grid" aria-label="My access request totals">
+        <article className="request-summary-card"><span>Total requests</span><strong>{loading ? '—' : requests.length}</strong><small>Across your workspace</small></article>
+        <article className="request-summary-card"><span>Waiting for review</span><strong>{loading ? '—' : pendingCount}</strong><small>Pending with a document owner</small></article>
+        <article className="request-summary-card"><span>Decisions recorded</span><strong>{loading ? '—' : approvedCount + deniedCount}</strong><small>{approvedCount} approved · {deniedCount} denied</small></article>
+      </div>
+
+      <form onSubmit={submitRequest} className="request-panel request-create-panel">
+        <div className="request-panel-heading"><span className="request-panel-icon"><Key size={17} /></span><div><h2>Request a document</h2><p>{initialDocumentId ? 'The owner’s request link filled in the document for you. Submit below to send your request.' : 'Paste the document ID or request link shared by its owner.'}</p></div></div>
+        <div className="request-form-grid">
+          <label className="request-search-field"><span>Document ID or link</span><input aria-label="Document ID or link" value={documentReference} onChange={(event) => setDocumentReference(event.target.value)} placeholder="Paste the document ID or link" required /></label>
+          <label className="request-search-field"><span>Permission needed</span><select aria-label="Requested permission" value={permission} onChange={(event) => setPermission(event.target.value as 'read' | 'edit')}><option value="read">Read access</option><option value="edit">Edit access</option></select></label>
+          <button type="submit" className="btn-vault-primary request-submit-button" disabled={submitting}>{submitting ? <><RefreshCw size={14} className="animate-spin" /> Sending…</> : <><Key size={14} /> Submit request</>}</button>
+        </div>
+        <p className="request-privacy-note"><ShieldCheck size={13} /> For privacy, the confirmation does not reveal whether a document ID exists in another workspace.</p>
+        {formError && <div className="alert alert-danger" role="alert"><XCircle size={14} />{formError}</div>}
+      </form>
+
+      <section className="request-panel">
+        <div className="request-panel-heading request-history-heading"><div><span className="panel-kicker">PRIVATE TO YOUR ACCOUNT</span><h2>Request history</h2></div><span className="request-total">{loading ? 'Loading…' : `${requests.length} request${requests.length === 1 ? '' : 's'}`}</span></div>
+        <div className="request-toolbar">
+          <div className="request-filter-buttons" role="tablist" aria-label="Filter my access requests">
+            {(['all', 'pending', 'approved', 'denied'] as const).map((value) => {
+              const count = value === 'all' ? requests.length : requests.filter((request) => request.status === value).length;
+              return <button key={value} type="button" role="tab" aria-selected={filter === value} className={filter === value ? 'selected' : ''} onClick={() => setFilter(value)}>{value === 'all' ? 'All' : value[0].toUpperCase() + value.slice(1)} <span>{count}</span></button>;
+            })}
+          </div>
+          <label className="request-search"><Search size={15} aria-hidden /><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Find a document or owner" aria-label="Search my requests" /></label>
+        </div>
+
+        {error && <div className="alert alert-danger" role="alert"><XCircle size={14} />{error}<button className="btn btn-ghost btn-sm" onClick={refetch}>Retry</button></div>}
+        {loading ? <div className="request-history-list">{Array.from({ length: 3 }).map((_, index) => <div className="skeleton h-20 w-full" key={index} />)}</div> : visibleRequests.length === 0 ? (
+          <div className="empty-state py-10"><div className="empty-state-icon"><Clock size={25} /></div><h3>{requests.length === 0 ? 'No requests yet' : 'No matching requests'}</h3><p>{requests.length === 0 ? 'A request and each owner decision will appear here.' : 'Try another status or search term.'}</p></div>
+        ) : (
+          <div className="request-history-list">
+            {visibleRequests.map((request) => {
+              const expanded = expandedRequest === request.id;
+              const accessDescription = request.currentAccessStatus === 'active'
+                ? `Active ${request.currentGrantPermission || 'read'} grant${request.currentGrantExpiresAt ? ` · expires ${formatDate(request.currentGrantExpiresAt)}` : ' · no expiry'}`
+                : request.currentAccessStatus === 'expired'
+                  ? `Grant expired ${request.currentGrantExpiresAt ? `on ${formatDate(request.currentGrantExpiresAt)}` : ''}`
+                  : request.currentAccessStatus === 'unavailable'
+                    ? 'Document is archived and unavailable'
+                    : request.status === 'approved'
+                      ? 'No active grant is attached to this request'
+                      : request.status === 'denied' ? 'No access grant was issued' : 'Waiting for the document owner';
+              return <article className="request-history-card" key={request.id}>
+                <div className="request-history-top">
+                  <span className="request-document-icon"><FileText size={17} /></span>
+                  <button className="request-history-title request-history-toggle" type="button" aria-expanded={expanded} onClick={() => setExpandedRequest(expanded ? null : request.id)}><strong>{request.documentTitle}</strong><span>{request.documentOwnerName || 'Document owner'} · {request.documentOwnerEmail || 'Workspace owner'}</span></button>
+                  <StatusBadge status={request.status} />
+                </div>
+                <div className="request-history-meta"><span><Key size={13} /> Requested <b>{request.targetPermission}</b></span><span><Clock size={13} /> Sent {formatDate(request.createdAt)}</span><span className={request.currentAccessStatus === 'active' ? 'request-access-active' : ''}><ShieldCheck size={13} /> {accessDescription}</span></div>
+                {expanded && <div className="request-detail-grid">
+                  <div><span>Request ID</span><code>{request.id}</code></div>
+                  <div><span>Document ID</span><code>{request.documentId}</code></div>
+                  <div><span>Owner</span><strong>{request.documentOwnerName || 'Workspace owner'}<small>{request.documentOwnerEmail}</small></strong></div>
+                  <div><span>Decision</span><strong>{request.status === 'pending' ? 'Awaiting review' : `${request.status[0].toUpperCase()}${request.status.slice(1)}${request.reviewedAt ? ` · ${formatDate(request.reviewedAt)}` : ''}`}{request.reviewerName && <small>By {request.reviewerName}</small>}</strong></div>
+                  {request.reviewerNotes && <div className="request-reviewer-note"><span>Owner note</span><p>{request.reviewerNotes}</p></div>}
+                  <div className="request-detail-actions">
+                    {request.currentAccessStatus === 'active' && !request.documentDeleted && <button className="btn-vault-primary" type="button" onClick={() => onOpenDocument(request.documentId)}><Eye size={13} /> Open document</button>}
+                    <button className="btn-vault-secondary" type="button" onClick={async () => { try { await navigator.clipboard.writeText(request.documentId); addToast('Document ID copied.', 'success'); } catch { addToast('Clipboard access is unavailable.', 'warning'); } }}><Copy size={13} /> Copy document ID</button>
+                  </div>
+                </div>}
+              </article>;
+            })}
+          </div>
+        )}
+      </section>
     </div>
   );
 }
@@ -1720,9 +2163,9 @@ function AccessRequestsView() {
 // Main App
 // ============================================================
 
-function AppShell({ initialUser, onQuickSwitch }: { initialUser: User; onQuickSwitch: (email: string) => void }) {
+function AppShell({ initialUser, initialRequestDocumentId, onRequestLinkHandled }: { initialUser: User; initialRequestDocumentId?: string | null; onRequestLinkHandled: () => void }) {
   const [user, setUser] = useState<User>(initialUser);
-  const [view, setView] = useState<View>('dashboard');
+  const [view, setView] = useState<View>(initialRequestDocumentId && initialUser.role === 'viewer' ? 'my-requests' : 'dashboard');
   const [activeDocId, setActiveDocId] = useState<string | undefined>();
   const [showCommandPalette, setShowCommandPalette] = useState(false);
   const [docs, setDocs] = useState<Document[]>([]);
@@ -1730,6 +2173,12 @@ function AppShell({ initialUser, onQuickSwitch }: { initialUser: User; onQuickSw
   useEffect(() => {
     setUser(initialUser);
   }, [initialUser]);
+
+  useEffect(() => {
+    if (!initialRequestDocumentId) return;
+    onRequestLinkHandled();
+    window.history.replaceState({}, '', `${window.location.pathname}${window.location.search}#/`);
+  }, []);
 
   // Fetch docs for command palette
   useEffect(() => {
@@ -1761,10 +2210,11 @@ function AppShell({ initialUser, onQuickSwitch }: { initialUser: User; onQuickSw
       case 'doc-detail': return activeDocId
         ? <DocumentDetailView docId={activeDocId} onBack={() => setView('documents')} />
         : <DocumentsView onNavigate={(v, id) => { setView(v); if (id) setActiveDocId(id); }} />;
-      case 'upload': return <UploadView onUploaded={() => setView('documents')} />;
+      case 'upload': return user.role === 'owner' ? <UploadView onUploaded={() => setView('documents')} /> : <DashboardView user={user} onNavigate={(v, id) => handleNavigate(v, id)} />;
       case 'users': return user.role === 'admin' ? <UsersView /> : <DashboardView user={user} onNavigate={(v, id) => handleNavigate(v, id)} />;
       case 'audit': return user.role === 'admin' ? <AuditView /> : <DashboardView user={user} onNavigate={(v, id) => handleNavigate(v, id)} />;
       case 'access-requests': return user.role === 'owner' ? <AccessRequestsView /> : <DashboardView user={user} onNavigate={(v, id) => handleNavigate(v, id)} />;
+      case 'my-requests': return user.role === 'viewer' ? <MyAccessRequestsView initialDocumentId={initialRequestDocumentId} onOpenDocument={(id) => handleNavigate('doc-detail', id)} /> : <DashboardView user={user} onNavigate={(v, id) => handleNavigate(v, id)} />;
       default: return <DashboardView user={user} onNavigate={(v, id) => handleNavigate(v, id)} />;
     }
   };
@@ -1805,7 +2255,6 @@ function AppShell({ initialUser, onQuickSwitch }: { initialUser: User; onQuickSw
               <ThemeToggle />
               <span className="badge badge-accent" style={{ fontSize: '0.72rem' }}>{user.role}</span>
               <span className="header-account-email">{user.email}</span>
-              {(user.email.endsWith('@acme.com') || user.email.endsWith('@stark.com')) && <select className="demo-switch-select" aria-label="Switch demo identity" value={user.email} onChange={(e) => onQuickSwitch(e.target.value)}>{DEMO_PERSONAS.map((persona) => <option key={persona.email} value={persona.email}>{persona.label}</option>)}</select>}
             </div>
           </header>
 
@@ -1819,6 +2268,7 @@ function AppShell({ initialUser, onQuickSwitch }: { initialUser: User; onQuickSw
             onClose={() => setShowCommandPalette(false)}
             onNavigate={(v, id) => { handleNavigate(v, id); setShowCommandPalette(false); }}
             documents={docs}
+            user={user}
           />
         )}
     </div>
@@ -1837,9 +2287,13 @@ export default function App() {
     return saved === 'light' ? 'light' : 'dark';
   });
   const [publicPage, setPublicPage] = useState<'home' | 'login' | 'signup'>(() => {
-    if (window.location.hash === '#/signup') return 'signup';
-    return window.location.hash === '#/login' ? 'login' : 'home';
+    const route = window.location.hash.split('?')[0];
+    if (route === '#/signup') return 'signup';
+    return route === '#/login' ? 'login' : 'home';
   });
+  const [requestDocumentId, setRequestDocumentId] = useState<string | null>(() =>
+    new URLSearchParams(window.location.hash.split('?')[1] || '').get('request')
+  );
 
   useEffect(() => {
     document.documentElement.dataset.theme = theme;
@@ -1852,7 +2306,10 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    const syncPage = () => setPublicPage(window.location.hash === '#/signup' ? 'signup' : window.location.hash === '#/login' ? 'login' : 'home');
+    const syncPage = () => {
+      const route = window.location.hash.split('?')[0];
+      setPublicPage(route === '#/signup' ? 'signup' : route === '#/login' ? 'login' : 'home');
+    };
     window.addEventListener('hashchange', syncPage);
     window.addEventListener('popstate', syncPage);
     return () => {
@@ -1887,8 +2344,8 @@ export default function App() {
         await api.auth.logout();
         return true;
       } catch (initialError) {
-        // A different tab or a quick demo-account switch can leave this tab with
-        // an older token. Refresh it from the active session and retry once.
+        // A different tab can leave this tab with an older token. Refresh it
+        // from the active session and retry once.
         if (initialError instanceof ApiError && initialError.statusCode === 403) {
           try {
             const session = await api.auth.me();
@@ -1911,15 +2368,7 @@ export default function App() {
     return serverLogout;
   }, []);
 
-  const handleQuickSwitch = useCallback(async (email: string) => {
-    try {
-      const res = await api.auth.login(email, 'TrustVault2026!#');
-      saveCsrfToken(res.csrfToken);
-      setUser(res.user);
-    } catch (err) {
-      console.error('Quick switch failed:', err);
-    }
-  }, []);
+  const inviteToken = new URLSearchParams(window.location.hash.split('?')[1] || '').get('invite');
 
   if (bootstrapping) {
     return (
@@ -1935,10 +2384,10 @@ export default function App() {
     <ThemeContext.Provider value={{ theme, toggleTheme: () => setTheme((current) => current === 'dark' ? 'light' : 'dark') }}>
       <ToastProvider>
         <AuthContext.Provider value={{ user, setUser, logout }}>
-          {user ? <AppShell initialUser={user} onQuickSwitch={handleQuickSwitch} /> : publicPage === 'home' ? (
+          {user ? <AppShell initialUser={user} initialRequestDocumentId={requestDocumentId} onRequestLinkHandled={() => setRequestDocumentId(null)} /> : publicPage === 'home' ? (
             <PublicLanding onSignIn={() => navigatePublic('login')} onRequestAccess={() => navigatePublic('signup')} />
           ) : (
-            <LoginPage onLogin={(u) => setUser(u)} onQuickSwitch={handleQuickSwitch} mode={publicPage} onHome={() => navigatePublic('home')} onSwitchMode={(mode) => navigatePublic(mode)} />
+            <LoginPage onLogin={(u) => setUser(u)} inviteToken={inviteToken} requestDocumentId={requestDocumentId} mode={publicPage} onHome={() => navigatePublic('home')} onSwitchMode={(mode) => navigatePublic(mode)} />
           )}
         </AuthContext.Provider>
       </ToastProvider>

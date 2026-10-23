@@ -166,40 +166,6 @@ body {
   animation: pulseBeacon 2.5s infinite;
 }
 
-.demo-persona-chips {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  flex-wrap: wrap;
-}
-
-.demo-chip {
-  background: rgba(255, 255, 255, 0.04);
-  border: 1px solid rgba(255, 255, 255, 0.09);
-  padding: 4px 10px;
-  border-radius: 6px;
-  color: var(--color-text-secondary);
-  font-size: 0.72rem;
-  font-family: var(--font-mono);
-  cursor: pointer;
-  transition: all var(--transition-fast);
-  line-height: 1;
-}
-
-.demo-chip:hover {
-  background: var(--color-accent-subtle);
-  border-color: var(--color-accent);
-  color: var(--color-accent);
-  box-shadow: 0 0 12px rgba(16, 185, 129, 0.25);
-  transform: translateY(-1px);
-}
-
-.demo-chip.active {
-  background: rgba(16, 185, 129, 0.15);
-  border-color: var(--color-accent);
-  color: var(--color-accent);
-  font-weight: 700;
-}
 
 /* ── App Shell & Sidebar Layout ──────────────────────────────── */
 .app-layout {

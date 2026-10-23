@@ -12,6 +12,15 @@ export interface AccessRequestItem {
   targetPermission: 'read' | 'edit';
   status: 'pending' | 'approved' | 'denied';
   createdAt: Date;
+  documentOwnerName?: string;
+  documentOwnerEmail?: string;
+  reviewedAt?: Date | null;
+  reviewerName?: string | null;
+  reviewerNotes?: string | null;
+  currentAccessStatus?: 'active' | 'expired' | 'none' | 'unavailable';
+  currentGrantPermission?: 'read' | 'edit' | null;
+  currentGrantExpiresAt?: Date | null;
+  documentDeleted?: boolean;
 }
 
 const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -59,22 +68,31 @@ export class AccessRequestService {
     }
 
     // 3. Upsert pending access request
-    const existingReq = await pool.query<{ id: string }>(
-      "SELECT id FROM access_requests WHERE document_id = $1 AND requester_id = $2 AND status = 'pending';",
+    const existingReq = await pool.query<{ id: string; target_permission: 'read' | 'edit' }>(
+      "SELECT id, target_permission FROM access_requests WHERE document_id = $1 AND requester_id = $2 AND status = 'pending' ORDER BY created_at DESC LIMIT 1;",
       [documentId, requester.id]
     );
 
+    let action = 'ACCESS_REQUEST_SUBMITTED';
     if (existingReq.rows.length === 0) {
       await pool.query(
         `INSERT INTO access_requests (document_id, requester_id, target_permission, status)
          VALUES ($1, $2, $3, 'pending');`,
         [documentId, requester.id, targetPermission]
       );
+    } else {
+      action = 'ACCESS_REQUEST_UPDATED';
+      if (existingReq.rows[0].target_permission !== targetPermission) {
+        await pool.query(
+          'UPDATE access_requests SET target_permission = $1 WHERE id = $2;',
+          [targetPermission, existingReq.rows[0].id]
+        );
+      }
     }
 
     await AuditService.log({
       eventType: 'ACCESS_REQUEST',
-      action: 'ACCESS_REQUEST_SUBMITTED',
+      action,
       status: 'INFO',
       actorId: requester.id,
       actorEmail: requester.email,
@@ -94,6 +112,14 @@ export class AccessRequestService {
    * List pending access requests for all documents owned by the caller. (Owner-only).
    */
   static async listPendingRequestsForOwner(owner: UserContext): Promise<AccessRequestItem[]> {
+    return this.listRequestsForOwner(owner, 'pending');
+  }
+
+  /** List request history for an owner, scoped to documents they own. */
+  static async listRequestsForOwner(
+    owner: UserContext,
+    status: 'pending' | 'approved' | 'denied' | 'all' = 'pending'
+  ): Promise<AccessRequestItem[]> {
     const res = await pool.query<{
       id: string;
       document_id: string;
@@ -104,6 +130,13 @@ export class AccessRequestService {
       target_permission: 'read' | 'edit';
       status: 'pending' | 'approved' | 'denied';
       created_at: Date;
+      reviewed_at: Date | null;
+      reviewer_name: string | null;
+      reviewer_notes: string | null;
+      grant_id: string | null;
+      grant_permission: 'read' | 'edit' | null;
+      grant_expires_at: Date | null;
+      is_deleted: boolean;
     }>(
       `SELECT
          r.id,
@@ -114,13 +147,23 @@ export class AccessRequestService {
          u.email AS requester_email,
          r.target_permission,
          r.status,
-         r.created_at
+         r.created_at,
+         r.reviewed_at,
+         reviewer.name AS reviewer_name,
+         r.reviewer_notes,
+         g.id AS grant_id,
+         g.permission AS grant_permission,
+         g.expires_at AS grant_expires_at,
+         d.is_deleted
        FROM access_requests r
        JOIN documents d ON r.document_id = d.id
        JOIN users u ON r.requester_id = u.id
-       WHERE d.owner_id = $1 AND d.organization_id = $2 AND r.status = 'pending'
+       LEFT JOIN users reviewer ON reviewer.id = r.reviewed_by
+       LEFT JOIN document_grants g ON g.document_id = r.document_id AND g.user_id = r.requester_id
+       WHERE d.owner_id = $1 AND d.organization_id = $2
+         AND ($3 = 'all' OR r.status = $3)
        ORDER BY r.created_at DESC;`,
-      [owner.id, owner.organizationId]
+      [owner.id, owner.organizationId, status]
     );
 
     return res.rows.map((row) => ({
@@ -133,6 +176,87 @@ export class AccessRequestService {
       targetPermission: row.target_permission,
       status: row.status,
       createdAt: row.created_at,
+      reviewedAt: row.reviewed_at,
+      reviewerName: row.reviewer_name,
+      reviewerNotes: row.reviewer_notes,
+      currentAccessStatus: row.is_deleted
+        ? 'unavailable'
+        : !row.grant_id
+          ? 'none'
+          : row.grant_expires_at && new Date(row.grant_expires_at).getTime() <= Date.now()
+            ? 'expired'
+            : 'active',
+      currentGrantPermission: row.grant_permission,
+      currentGrantExpiresAt: row.grant_expires_at,
+      documentDeleted: row.is_deleted,
+    }));
+  }
+
+  /** List only the authenticated requester's own access request history. */
+  static async listRequestsForRequester(requester: UserContext): Promise<AccessRequestItem[]> {
+    const res = await pool.query<{
+      id: string;
+      document_id: string;
+      document_title: string;
+      requester_id: string;
+      requester_name: string;
+      requester_email: string;
+      target_permission: 'read' | 'edit';
+      status: 'pending' | 'approved' | 'denied';
+      created_at: Date;
+      document_owner_name: string;
+      document_owner_email: string;
+      reviewed_at: Date | null;
+      reviewer_name: string | null;
+      reviewer_notes: string | null;
+      grant_id: string | null;
+      grant_permission: 'read' | 'edit' | null;
+      grant_expires_at: Date | null;
+      is_deleted: boolean;
+    }>(
+      `SELECT r.id, r.document_id, d.title AS document_title,
+              r.requester_id, u.name AS requester_name, u.email AS requester_email,
+              r.target_permission, r.status, r.created_at,
+              owner.name AS document_owner_name, owner.email AS document_owner_email,
+              r.reviewed_at, reviewer.name AS reviewer_name, r.reviewer_notes,
+              g.id AS grant_id, g.permission AS grant_permission,
+              g.expires_at AS grant_expires_at, d.is_deleted
+       FROM access_requests r
+       JOIN documents d ON d.id = r.document_id
+       JOIN users u ON u.id = r.requester_id
+       JOIN users owner ON owner.id = d.owner_id
+       LEFT JOIN users reviewer ON reviewer.id = r.reviewed_by
+       LEFT JOIN document_grants g ON g.document_id = r.document_id AND g.user_id = r.requester_id
+       WHERE r.requester_id = $1 AND d.organization_id = $2
+       ORDER BY r.created_at DESC;`,
+      [requester.id, requester.organizationId]
+    );
+
+    return res.rows.map((row) => ({
+      id: row.id,
+      documentId: row.document_id,
+      documentTitle: row.document_title,
+      requesterId: row.requester_id,
+      requesterName: row.requester_name,
+      requesterEmail: row.requester_email,
+      targetPermission: row.target_permission,
+      status: row.status,
+      createdAt: row.created_at,
+      documentOwnerName: row.document_owner_name,
+      documentOwnerEmail: row.document_owner_email,
+      reviewedAt: row.reviewed_at,
+      reviewerName: row.reviewer_name,
+      reviewerNotes: row.reviewer_notes,
+      currentAccessStatus: row.is_deleted
+        ? 'unavailable'
+        : !row.grant_id
+          ? 'none'
+          : row.grant_expires_at && new Date(row.grant_expires_at).getTime() <= Date.now()
+            ? 'expired'
+            : 'active',
+      currentGrantPermission: row.grant_permission,
+      currentGrantExpiresAt: row.grant_expires_at,
+      documentDeleted: row.is_deleted,
     }));
   }
 

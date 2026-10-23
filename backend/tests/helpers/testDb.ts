@@ -3,7 +3,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { PGlite } from '@electric-sql/pglite';
 import { DatabaseClient, DatabasePool, setDatabasePool } from '../../src/db/index.js';
-import { runSeed } from '../../../db/seed.ts';
+import { runDemoSeed } from './seedDemo.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -58,7 +58,7 @@ export async function setupTestDatabase(): Promise<{ db: PGlite; pool: DatabaseP
   setDatabasePool(poolAdapter);
 
   // 3. Seed data
-  await runSeed(poolAdapter as any);
+  await runDemoSeed(poolAdapter);
 
   return { db, pool: poolAdapter };
 }
