@@ -7,6 +7,7 @@ TrustVault is a role-based document workspace with encrypted storage, explicit a
 1. Copy `.env.example` to `.env`. Set a valid `DATABASE_URL`, a 64-character hex `MASTER_KEY`, a private `SESSION_SECRET` of at least 32 characters, `CORS_ORIGIN`, and the initial administrator's organization, email, name, and password. The password must be at least 12 characters. In production, the service fails fast when any required secret or database setting is missing.
 2. Start the local stack with `docker compose up --build`.
 3. Open [http://localhost:5173](http://localhost:5173) and sign in with the administrator account from `.env`.
+4. Use the administrator dashboard to create Owner and Viewer accounts with initial passwords. Public registration and email OTP are disabled.
 
 If Docker is not installed, start PostgreSQL locally and ensure the database in
 `DATABASE_URL` is listening on port 5432 before running `npm run backend:dev`.
