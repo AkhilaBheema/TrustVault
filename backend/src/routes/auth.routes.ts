@@ -54,7 +54,7 @@ export async function authRoutes(app: FastifyInstance) {
   app.post('/api/auth/send-otp', async (request, reply) => {
     const parsed = z.object({
       email: z.string().trim().email(),
-      name: z.string().trim().min(2).max(120).optional().default(''),
+      name: z.string().trim().optional().default(''),
       mode: z.enum(['register', 'login']).default('login'),
     }).safeParse(request.body);
     if (!parsed.success) return reply.status(400).send({ error: 'Bad Request', message: parsed.error.errors[0]?.message });

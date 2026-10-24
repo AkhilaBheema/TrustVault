@@ -57,8 +57,9 @@ export function buildApp(options: AppOptions = {}): FastifyInstance {
   if (!allowedOrigin) {
     throw new Error('CORS_ORIGIN must be configured');
   }
+  const corsOrigins = allowedOrigin.split(',').map(o => o.trim());
   app.register(cors, {
-    origin: allowedOrigin,
+    origin: corsOrigins.length === 1 ? corsOrigins[0] : corsOrigins,
     credentials: true,
     methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
     allowedHeaders: ['Content-Type', 'Authorization', 'X-CSRF-Token'],
