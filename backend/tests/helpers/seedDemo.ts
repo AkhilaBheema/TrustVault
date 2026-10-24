@@ -2,6 +2,7 @@ import crypto from 'node:crypto';
 import * as argon2 from '@node-rs/argon2';
 import { EncryptionService } from '../../src/services/encryption.service.js';
 import { StorageService } from '../../src/services/storage.service.js';
+import { AuditService, GENESIS_PREV_HASH } from '../../src/services/audit.service.js';
 import type { DatabasePool } from '../../src/db/index.js';
 
 export const SEED_PASSWORD_PLAIN = 'TrustVault2026!#';
@@ -297,24 +298,24 @@ export async function runDemoSeed(pool: DatabasePool) {
     console.log('[SEED] Initializing tamper-evident audit log genesis block...');
     const existingAudit = await client.query('SELECT id FROM audit_events LIMIT 1;');
     if (existingAudit.rows.length === 0) {
-      const prevHash = '0000000000000000000000000000000000000000000000000000000000000000';
+      const prevHash = GENESIS_PREV_HASH;
       const eventType = 'SYSTEM_GENESIS';
       const action = 'DATABASE_INITIALIZED';
       const status = 'INFO';
       const reason = 'TrustVault database seeded with multi-tenant accounts';
       const payloadObj = { seed: true, version: '1.0.0' };
-      const canonicalPayload = JSON.stringify(payloadObj); // keys already in sorted order {"seed":true,"version":"1.0.0"}
-
-      const currentHash = crypto
-        .createHash('sha256')
-        .update(`${prevHash}|1|${eventType}|SYSTEM|${action}|${status}|${canonicalPayload}`)
-        .digest('hex');
+      const canonicalPayload = canonicalJson(payloadObj);
+      const createdAt = new Date().toISOString();
+      const currentHash = AuditService.computeEventHash(
+        prevHash, 1, eventType, null, 'SYSTEM', null, null, null,
+        action, status, reason, null, null, createdAt, payloadObj
+      );
 
       await client.query(
         `INSERT INTO audit_events (
-           sequence_number, event_type, actor_email, action, status, reason, payload, prev_hash, current_hash
-         ) VALUES (1, $1, 'SYSTEM', $2, $3, $4, $5::jsonb, $6, $7);`,
-        [eventType, action, status, reason, canonicalPayload, prevHash, currentHash]
+           sequence_number, event_type, actor_email, action, status, reason, payload, prev_hash, current_hash, created_at
+         ) VALUES (1, $1, 'SYSTEM', $2, $3, $4, $5::jsonb, $6, $7, $8);`,
+        [eventType, action, status, reason, canonicalPayload, prevHash, currentHash, createdAt]
       );
     }
 
@@ -359,16 +360,31 @@ export async function runDemoSeed(pool: DatabasePool) {
 
       for (const event of demoEvents) {
         const canonicalPayload = canonicalJson(event.payload);
-        const currentHash = crypto.createHash('sha256')
-          .update(`${previousHash}|${sequenceNumber}|${event.eventType}|${event.actorEmail}|${event.action}|${event.status}|${canonicalPayload}`)
-          .digest('hex');
+        const createdAt = new Date().toISOString();
+        const currentHash = AuditService.computeEventHash(
+          previousHash,
+          sequenceNumber,
+          event.eventType,
+          event.actorId,
+          event.actorEmail,
+          event.organizationId,
+          'document',
+          event.targetId,
+          event.action,
+          event.status,
+          event.reason,
+          null,
+          null,
+          createdAt,
+          event.payload
+        );
         await client.query(
           `INSERT INTO audit_events (
              sequence_number, event_type, actor_id, actor_email, organization_id,
-             target_type, target_id, action, status, reason, payload, prev_hash, current_hash
-           ) VALUES ($1, $2, $3, $4, $5, 'document', $6, $7, $8, $9, $10::jsonb, $11, $12);`,
+             target_type, target_id, action, status, reason, payload, prev_hash, current_hash, created_at
+           ) VALUES ($1, $2, $3, $4, $5, 'document', $6, $7, $8, $9, $10::jsonb, $11, $12, $13);`,
           [sequenceNumber, event.eventType, event.actorId, event.actorEmail, event.organizationId,
-            event.targetId, event.action, event.status, event.reason, canonicalPayload, previousHash, currentHash]
+            event.targetId, event.action, event.status, event.reason, canonicalPayload, previousHash, currentHash, createdAt]
         );
         previousHash = currentHash;
         sequenceNumber += 1;

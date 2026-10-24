@@ -20,14 +20,15 @@ export class EncryptionService {
    * Retrieve and validate the 256-bit Master Key from environment.
    */
   private static getMasterKey(): Buffer {
-    const rawKey = process.env.MASTER_KEY || '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef';
-    let keyBuffer: Buffer;
-
-    if (rawKey.length === 64) {
-      keyBuffer = Buffer.from(rawKey, 'hex');
-    } else {
-      keyBuffer = Buffer.from(rawKey, 'utf8');
+    const rawKey = process.env.MASTER_KEY;
+    if (!rawKey) {
+      throw new Error('MASTER_KEY is required to encrypt or decrypt document data');
     }
+    if (!/^[0-9a-fA-F]{64}$/.test(rawKey)) {
+      throw new Error('MASTER_KEY must be exactly 64 hexadecimal characters');
+    }
+
+    const keyBuffer = Buffer.from(rawKey, 'hex');
 
     if (keyBuffer.length !== KEY_LENGTH) {
       throw new Error(`Invalid MASTER_KEY length: expected ${KEY_LENGTH} bytes, got ${keyBuffer.length}`);

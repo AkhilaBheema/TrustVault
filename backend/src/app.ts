@@ -23,7 +23,7 @@ export interface AppOptions {
 export function buildApp(options: AppOptions = {}): FastifyInstance {
   const app = fastify({
     logger: options.enableLogging ?? false,
-    trustProxy: true, // For real IP detection behind reverse proxies
+    trustProxy: process.env.TRUST_PROXY === 'true',
   });
 
   // 1. Security Headers (Helmet)
@@ -53,7 +53,10 @@ export function buildApp(options: AppOptions = {}): FastifyInstance {
   });
 
   // 2. CORS locked to own origin
-  const allowedOrigin = process.env.CORS_ORIGIN || 'http://localhost:5173';
+  const allowedOrigin = process.env.CORS_ORIGIN;
+  if (!allowedOrigin) {
+    throw new Error('CORS_ORIGIN must be configured');
+  }
   app.register(cors, {
     origin: allowedOrigin,
     credentials: true,
@@ -63,7 +66,6 @@ export function buildApp(options: AppOptions = {}): FastifyInstance {
 
   // 3. HTTP-Only Cookie Support
   app.register(cookie, {
-    secret: process.env.SESSION_SECRET || 'a_cryptographically_secure_session_secret_32b',
     parseOptions: {},
   });
 

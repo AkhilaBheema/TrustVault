@@ -102,7 +102,10 @@ export class CryptoService {
    * Bound to the server session secret and the opaque session token.
    */
   static generateCsrfToken(sessionToken: string): string {
-    const secret = process.env.SESSION_SECRET || 'fallback_trustvault_csrf_secret_32_bytes_min';
+    const secret = process.env.SESSION_SECRET;
+    if (!secret || secret.length < 32) {
+      throw new Error('SESSION_SECRET must be configured with at least 32 characters');
+    }
     return crypto.createHmac('sha256', secret).update(`csrf:${sessionToken}`).digest('hex');
   }
 

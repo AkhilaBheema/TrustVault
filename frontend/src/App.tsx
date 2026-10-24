@@ -10,8 +10,8 @@ import {
 import './index.css';
 import './redesign.css';
 import {
-  api, API_BASE_URL, saveCsrfToken, clearCsrfToken, ApiError,
-  type User, type Document, type Suggestion, type ShareInvite, type AccessRequest,
+  api, saveCsrfToken, clearCsrfToken, ApiError,
+  type User, type Document, type CatalogDocument, type Suggestion, type ShareInvite, type AccessRequest,
 } from './api.ts';
 
 // ============================================================
@@ -346,84 +346,195 @@ function LoginPage({ onLogin, mode, onHome, onSwitchMode, inviteToken, requestDo
   inviteToken?: string | null;
   requestDocumentId?: string | null;
 }) {
+  // OTP flow state
+  const [step, setStep] = useState<'email' | 'otp' | 'password'>('email');
   const [email, setEmail] = useState('');
+  const [name, setName] = useState('');
+  const [otp, setOtp] = useState('');
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  const [countdown, setCountdown] = useState(0);
   const addToast = useToast();
 
-  const handleSubmit = async (e: React.FormEvent) => {
+  // Resend countdown
+  useEffect(() => {
+    if (countdown <= 0) return;
+    const t = setTimeout(() => setCountdown(c => c - 1), 1000);
+    return () => clearTimeout(t);
+  }, [countdown]);
+
+  const handleSendOtp = async (e: React.FormEvent) => {
     e.preventDefault();
-    setLoading(true);
-    setError('');
+    setLoading(true); setError('');
     try {
-      const res = await api.auth.login(email.trim(), password);
+      const m = mode === 'signup' ? 'register' : 'login';
+      await api.auth.sendOtp(email.trim(), name.trim(), m);
+      setStep('otp'); setCountdown(60);
+      addToast('Verification code sent — check your Gmail inbox.', 'success');
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : 'Could not send code. Try again.');
+    } finally { setLoading(false); }
+  };
+
+  const handleVerifyOtp = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setLoading(true); setError('');
+    try {
+      const res = await api.auth.verifyOtp(email.trim(), otp.trim(), name.trim());
       saveCsrfToken(res.csrfToken);
       if (inviteToken) {
-        try {
-          const accepted = await api.invites.accept(inviteToken);
-          addToast(accepted.message || 'Invitation accepted.', 'success');
-        } catch (inviteError) {
-          addToast(inviteError instanceof Error ? `Signed in, but the invitation could not be accepted: ${inviteError.message}` : 'Signed in, but the invitation could not be accepted.', 'warning');
-        }
+        try { const a = await api.invites.accept(inviteToken); addToast(a.message || 'Invite accepted.', 'success'); }
+        catch (ie) { addToast(ie instanceof Error ? ie.message : 'Invite error.', 'warning'); }
       }
       if (inviteToken || requestDocumentId) window.history.replaceState({}, '', `${window.location.pathname}${window.location.search}#/login`);
       onLogin(res.user);
+      addToast(`Welcome, ${res.user.name}!`, 'success');
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : 'Invalid or expired code.');
+    } finally { setLoading(false); }
+  };
+
+  const handlePasswordLogin = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setLoading(true); setError('');
+    try {
+      const res = await api.auth.login(email.trim(), password);
+      saveCsrfToken(res.csrfToken);
+      onLogin(res.user);
       addToast(`Signed in as ${res.user.name}`, 'success');
     } catch (err) {
-      const msg = err instanceof ApiError ? err.message : 'We could not verify those credentials.';
-      setError(msg);
-    } finally {
-      setLoading(false);
-    }
+      setError(err instanceof ApiError ? err.message : 'Invalid credentials.');
+    } finally { setLoading(false); }
   };
+
+  const isRegister = mode === 'signup';
 
   return (
     <div className="auth-page">
-      <header className="auth-header"><BrandLockup onClick={onHome} /><div className="auth-header-right"><span>Protected workspace access</span><ThemeToggle /></div></header>
+      <header className="auth-header">
+        <BrandLockup onClick={onHome} />
+        <div className="auth-header-right"><span>Protected workspace access</span><ThemeToggle /></div>
+      </header>
       <main className="auth-layout">
         <section className="auth-story">
           <div className="eyebrow"><span className="eyebrow-dot" /> YOUR DOCUMENTS. YOUR RULES.</div>
-          <h1>{mode === 'login' ? <>A quieter way<br />to <em>stay in control.</em></> : <>Start with the<br /><em>right invitation.</em></>}</h1>
-          <p>{mode === 'login' ? 'Your workspace is ready when you are. Sign in to reach the files and people you have permission to see.' : 'TrustVault workspaces are provisioned by an administrator. Send them a note and they can set up your account.'}</p>
-          <div className="auth-assurance"><div className="assurance-seal"><ShieldCheck size={21} strokeWidth={1.5} /></div><div><strong>Every session is accountable.</strong><span>Every request is authorized. Every outcome is recorded.</span></div></div>
-          <div className="auth-coordinates"><span>TRUSTVAULT / ACCESS PORTAL</span><span>IDENTITY → POLICY → PROOF</span></div>
+          <h1>{isRegister ? <><span>Create your</span><br /><em>secure account.</em></> : <><span>A quieter way</span><br /><em>to stay in control.</em></>}</h1>
+          <p>{isRegister ? 'Register with your Gmail. We send a one-time code to verify you — no passwords needed.' : 'Enter your Gmail and we\'ll send a 6-digit code. No password required.'}</p>
+          <div className="auth-assurance">
+            <div className="assurance-seal"><ShieldCheck size={21} strokeWidth={1.5} /></div>
+            <div><strong>One-time codes. Zero stored passwords.</strong><span>Your identity is verified via Gmail OTP every login.</span></div>
+          </div>
+          <div style={{ marginTop: 20, display: 'flex', flexDirection: 'column', gap: 8 }}>
+            {(['📧 Enter Gmail address', '🔢 Receive 6-digit code', '✅ Verified & signed in'] as const).map((s, i) => (
+              <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 10, fontSize: '0.8rem', color: 'var(--color-text-muted)' }}>
+                <span style={{ width: 22, height: 22, borderRadius: '50%', background: i < (step === 'otp' ? 1 : 0) + 1 ? 'var(--color-accent)' : 'var(--color-surface-3)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '0.65rem', color: '#fff', flexShrink: 0, fontWeight: 700 }}>{i + 1}</span>
+                {s}
+              </div>
+            ))}
+          </div>
+          <div className="auth-coordinates"><span>TRUSTVAULT / ACCESS PORTAL</span><span>GMAIL OTP → SESSION → PROOF</span></div>
         </section>
 
         <section className="auth-form-wrap">
           <div className="auth-card">
-            <div className="auth-mode-switch" role="tablist" aria-label="Account access options">
-              <button className={mode === 'login' ? 'selected' : ''} type="button" onClick={() => { setError(''); onSwitchMode('login'); }} role="tab" aria-selected={mode === 'login'}>Sign in</button>
-              <button className={mode === 'signup' ? 'selected' : ''} type="button" onClick={() => { setError(''); onSwitchMode('signup'); }} role="tab" aria-selected={mode === 'signup'}>Request an invite</button>
+            {/* Tab switcher */}
+            <div className="auth-mode-switch" role="tablist">
+              <button className={!isRegister && step !== 'password' ? 'selected' : ''} type="button" onClick={() => { setError(''); setStep('email'); setOtp(''); onSwitchMode('login'); }}>Sign in</button>
+              <button className={isRegister ? 'selected' : ''} type="button" onClick={() => { setError(''); setStep('email'); setOtp(''); onSwitchMode('signup'); }}>Register</button>
+              <button className={step === 'password' ? 'selected' : ''} type="button" onClick={() => { setError(''); setStep('password'); }} title="Admin password login">Password</button>
             </div>
-            {mode === 'login' ? (
+
+            {/* ── Password login (admin fallback) ── */}
+            {step === 'password' && (
               <>
-                <div className="auth-card-title"><span className="form-kicker">WELCOME BACK</span><h2>Enter your workspace.</h2><p>Use the email and password provided by your administrator.</p></div>
-                <form onSubmit={handleSubmit} className="public-form">
-                  <div className="public-field"><label htmlFor="login-email">Work email</label><input id="login-email" type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="you@company.com" className="public-input" autoComplete="username" required /></div>
-                  <div className="public-field"><div className="field-label-row"><label htmlFor="login-password">Password</label><span>Workspace credential</span></div><input id="login-password" type="password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="Enter your password" className="public-input" autoComplete="current-password" required /></div>
+                <div className="auth-card-title"><span className="form-kicker">ADMIN ACCESS</span><h2>Password sign-in</h2><p>For accounts created by your administrator with a set password.</p></div>
+                <form onSubmit={handlePasswordLogin} className="public-form">
+                  <div className="public-field"><label htmlFor="pw-email">Work email</label><input id="pw-email" type="email" value={email} onChange={e => setEmail(e.target.value)} placeholder="you@company.com" className="public-input" autoComplete="username" required /></div>
+                  <div className="public-field"><label htmlFor="pw-pass">Password</label><input id="pw-pass" type="password" value={password} onChange={e => setPassword(e.target.value)} placeholder="Enter your password" className="public-input" autoComplete="current-password" required /></div>
                   {error && <div className="auth-error" role="alert"><XCircle size={15} /><span>{error}</span></div>}
-                  <button type="submit" disabled={loading} className="button button-accent auth-submit">{loading ? <><RefreshCw size={16} className="animate-spin" /> Checking credentials</> : <>Continue securely <ArrowRight size={16} /></>}</button>
+                  <button type="submit" disabled={loading} className="button button-accent auth-submit">{loading ? <><RefreshCw size={16} className="animate-spin" /> Checking…</> : <>Continue securely <ArrowRight size={16} /></>}</button>
                 </form>
                 <div className="auth-foot"><Lock size={13} /><span>Sessions are private, scoped, and immediately revocable.</span></div>
               </>
-            ) : (
+            )}
+
+            {/* ── Step 1: Email input ── */}
+            {step === 'email' && (
               <>
-                <div className="auth-card-title"><span className="form-kicker">WORKSPACE ACCESS</span><h2>Join your team.</h2><p>Your workspace administrator creates accounts and assigns permissions. Contact them to request access.</p></div>
-                <div className="auth-foot"><Lock size={13} /><span>For security, accounts are provisioned by your organization.</span></div>
+                <div className="auth-card-title">
+                  <span className="form-kicker">{isRegister ? 'CREATE ACCOUNT' : 'GMAIL SIGN-IN'}</span>
+                  <h2>{isRegister ? 'Register with Gmail.' : 'Enter your Gmail.'}</h2>
+                  <p>{isRegister ? 'We\'ll send a 6-digit code to verify your email.' : 'We\'ll send a one-time code — no password needed.'}</p>
+                </div>
+                <form onSubmit={handleSendOtp} className="public-form">
+                  {isRegister && (
+                    <div className="public-field"><label htmlFor="reg-name">Full name</label><input id="reg-name" type="text" value={name} onChange={e => setName(e.target.value)} placeholder="Your full name" className="public-input" required minLength={2} /></div>
+                  )}
+                  <div className="public-field">
+                    <label htmlFor="otp-email">Gmail address</label>
+                    <div style={{ position: 'relative' }}>
+                      <span style={{ position: 'absolute', left: 12, top: '50%', transform: 'translateY(-50%)', fontSize: 16 }}>📧</span>
+                      <input id="otp-email" type="email" value={email} onChange={e => setEmail(e.target.value)} placeholder="you@gmail.com" className="public-input" style={{ paddingLeft: 38 }} autoComplete="email" required />
+                    </div>
+                  </div>
+                  {error && <div className="auth-error" role="alert"><XCircle size={15} /><span>{error}</span></div>}
+                  <button type="submit" disabled={loading} className="button button-accent auth-submit">
+                    {loading ? <><RefreshCw size={16} className="animate-spin" /> Sending code…</> : <>Send verification code <ArrowRight size={16} /></>}
+                  </button>
+                </form>
+                <div className="auth-foot"><Lock size={13} /><span>A 6-digit code valid for 10 minutes will be sent.</span></div>
+              </>
+            )}
+
+            {/* ── Step 2: OTP input ── */}
+            {step === 'otp' && (
+              <>
+                <div className="auth-card-title">
+                  <span className="form-kicker">CHECK YOUR GMAIL</span>
+                  <h2>Enter your code.</h2>
+                  <p>A 6-digit code was sent to <strong>{email}</strong>. Enter it below to verify.</p>
+                </div>
+                <form onSubmit={handleVerifyOtp} className="public-form">
+                  <div className="public-field">
+                    <label htmlFor="otp-code">6-digit verification code</label>
+                    <input
+                      id="otp-code" type="text" inputMode="numeric" pattern="[0-9]{6}"
+                      value={otp} onChange={e => setOtp(e.target.value.replace(/\D/g, '').slice(0, 6))}
+                      placeholder="000000" className="public-input"
+                      style={{ letterSpacing: '0.3em', fontSize: '1.5rem', textAlign: 'center', fontWeight: 700 }}
+                      autoComplete="one-time-code" maxLength={6} required
+                    />
+                  </div>
+                  {error && <div className="auth-error" role="alert"><XCircle size={15} /><span>{error}</span></div>}
+                  <button type="submit" disabled={loading || otp.length < 6} className="button button-accent auth-submit">
+                    {loading ? <><RefreshCw size={16} className="animate-spin" /> Verifying…</> : <>Verify & sign in <ArrowRight size={16} /></>}
+                  </button>
+                </form>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: 12 }}>
+                  <button type="button" className="text-link" style={{ fontSize: '0.8rem' }} onClick={() => { setStep('email'); setOtp(''); setError(''); }}>← Change email</button>
+                  <button
+                    type="button" className="text-link" style={{ fontSize: '0.8rem' }}
+                    disabled={countdown > 0} onClick={handleSendOtp}
+                  >
+                    {countdown > 0 ? `Resend in ${countdown}s` : 'Resend code'}
+                  </button>
+                </div>
+                <div className="auth-foot"><Lock size={13} /><span>Code expires in 10 minutes. Check spam if not received.</span></div>
               </>
             )}
           </div>
           <button type="button" className="back-home" onClick={onHome}>← Back to TrustVault</button>
         </section>
       </main>
-      <footer className="auth-footer"><span>TRUSTVAULT / SECURE ACCESS</span><span>ENCRYPTED IN TRANSIT · VERIFIED AT EVERY REQUEST</span></footer>
+      <footer className="auth-footer"><span>TRUSTVAULT / SECURE ACCESS</span><span>GMAIL OTP · ENCRYPTED · VERIFIED</span></footer>
     </div>
   );
 }
 // ============================================================
 // Sidebar + Layout
 // ============================================================
+
 
 type View = 'dashboard' | 'documents' | 'upload' | 'doc-detail' | 'users' | 'audit' | 'access-requests' | 'my-requests' | 'settings';
 
@@ -782,8 +893,14 @@ function DocumentDetailView({ docId, onBack }: { docId: string; onBack: () => vo
   const handleDownload = async () => {
     try {
       const { rawTicket } = await api.tickets.issue(docId);
-      // Navigate to download URL — the browser will trigger the download
-      window.location.href = `${API_BASE_URL}/documents/${docId}/download?ticket=${encodeURIComponent(rawTicket)}`;
+      const { blob, filename } = await api.tickets.download(docId, rawTicket);
+      const objectUrl = URL.createObjectURL(blob);
+      const anchor = document.createElement('a');
+      anchor.href = objectUrl;
+      anchor.download = filename;
+      anchor.click();
+      URL.revokeObjectURL(objectUrl);
+      addToast('Download started.', 'success');
     } catch (err) {
       addToast(err instanceof Error ? err.message : 'Download failed', 'error');
     }
@@ -1565,14 +1682,14 @@ function UsersView() {
                         </button>
                       )}
                       <button className="btn btn-ghost btn-sm" onClick={() => handleForceLogout(u.id, u.email)}>
-                        <LogOut size={12} />
+                        <LogOut size={12} /> <span className="sr-only">Force logout {u.email}</span>
                       </button>
                       <button className="btn btn-ghost btn-sm" onClick={() => setActivityUser({ id: u.id, name: u.name, email: u.email })} title={`View activity for ${u.email}`}>
                         <Activity size={12} /> Activity
                       </button>
                       {u.lockedUntil && new Date(u.lockedUntil) > new Date() && (
-                        <button className="btn btn-ghost btn-sm" onClick={() => handleUnlock(u.id, u.email)}>
-                          <Unlock size={12} />
+                        <button className="btn btn-ghost btn-sm" onClick={() => handleUnlock(u.id, u.email)} aria-label={`Unlock ${u.email}`} title={`Unlock ${u.email}`}>
+                          <Unlock size={12} /> <span className="sr-only">Unlock {u.email}</span>
                         </button>
                       )}
                     </div>
@@ -1699,7 +1816,7 @@ function AuditView() {
   const [verifying, setVerifying] = useState(false);
   const [verifyResult, setVerifyResult] = useState<{ isValid: boolean; totalRecords: number; message: string } | null>(null);
 
-  const { data, loading, refetch } = useAsync(
+  const { data, loading, error, refetch } = useAsync(
     () => api.admin.audit({ page: String(page), pageSize: '50', ...(statusFilter ? { status: statusFilter } : {}), ...(eventTypeFilter ? { eventType: eventTypeFilter } : {}) }),
     [page, statusFilter, eventTypeFilter]
   );
@@ -1776,7 +1893,13 @@ function AuditView() {
         </div>
       )}
 
-      {loading ? (
+      {error ? (
+        <div className="alert alert-danger" role="alert">
+          <AlertTriangle size={16} />
+          <span>Could not load the audit log: {error}</span>
+          <button className="btn btn-secondary btn-sm" onClick={refetch}>Retry</button>
+        </div>
+      ) : loading ? (
         <div className="table-container">
           <table className="table"><thead><tr><th>Seq</th><th>Time</th><th>Actor</th><th>Action</th><th>Status</th><th>Target</th></tr></thead>
             <tbody>{Array.from({ length: 8 }).map((_, i) => <SkeletonRow key={i} cols={6} />)}</tbody>
@@ -2041,23 +2164,57 @@ function AccessRequestsView() {
 
 function MyAccessRequestsView({ onOpenDocument, initialDocumentId }: { onOpenDocument: (documentId: string) => void; initialDocumentId?: string | null }) {
   const addToast = useToast();
+  const [activeTab, setActiveTab] = useState<'catalog' | 'form' | 'history'>(initialDocumentId ? 'form' : 'catalog');
   const [documentReference, setDocumentReference] = useState(initialDocumentId || '');
   const [permission, setPermission] = useState<'read' | 'edit'>('read');
   const [submitting, setSubmitting] = useState(false);
   const [formError, setFormError] = useState('');
   const [filter, setFilter] = useState<'all' | 'pending' | 'approved' | 'denied'>('all');
   const [search, setSearch] = useState('');
+  const [catalogSearch, setCatalogSearch] = useState('');
+  const [catalogCategory, setCatalogCategory] = useState('');
+  const [requestingDocId, setRequestingDocId] = useState<string | null>(null);
   const [expandedRequest, setExpandedRequest] = useState<string | null>(null);
+
   const { data, loading, error, refetch } = useAsync(() => api.accessRequests.listMine(), []);
+  const { data: catalogData, loading: catalogLoading, error: catalogError, refetch: refetchCatalog } = useAsync(
+    () => api.documents.catalog(),
+    []
+  );
+
   const requests = data?.requests || [];
-  const pendingCount = requests.filter((request) => request.status === 'pending').length;
-  const approvedCount = requests.filter((request) => request.status === 'approved').length;
-  const deniedCount = requests.filter((request) => request.status === 'denied').length;
+  const pendingCount = requests.filter((r) => r.status === 'pending').length;
+  const approvedCount = requests.filter((r) => r.status === 'approved').length;
+  const deniedCount = requests.filter((r) => r.status === 'denied').length;
   const visibleRequests = requests.filter((request) => {
     const matchesStatus = filter === 'all' || request.status === filter;
     const text = `${request.documentTitle} ${request.documentId} ${request.documentOwnerName || ''} ${request.documentOwnerEmail || ''}`.toLowerCase();
     return matchesStatus && text.includes(search.trim().toLowerCase());
   });
+
+  const catalogDocs: CatalogDocument[] = catalogData?.documents || [];
+  const catalogCategories = [...new Set(catalogDocs.map((d) => d.category).filter(Boolean))].sort();
+  const visibleCatalog = catalogDocs.filter((d) => {
+    const matchesCat = !catalogCategory || d.category === catalogCategory;
+    const matchesSearch = !catalogSearch.trim() || d.title.toLowerCase().includes(catalogSearch.trim().toLowerCase());
+    return matchesCat && matchesSearch;
+  });
+
+  // Track which documents already have a pending request by the viewer
+  const pendingDocIds = new Set(requests.filter((r) => r.status === 'pending').map((r) => r.documentId));
+
+  const requestAccessFromCatalog = async (doc: CatalogDocument, perm: 'read' | 'edit' = 'read') => {
+    setRequestingDocId(doc.id);
+    try {
+      const result = await api.accessRequests.submit(doc.id, perm);
+      addToast(result.message, 'success');
+      await refetch();
+    } catch (err) {
+      addToast(err instanceof Error ? err.message : 'Could not submit the access request.', 'error');
+    } finally {
+      setRequestingDocId(null);
+    }
+  };
 
   const submitRequest = async (event: React.FormEvent) => {
     event.preventDefault();
@@ -2083,78 +2240,321 @@ function MyAccessRequestsView({ onOpenDocument, initialDocumentId }: { onOpenDoc
   return (
     <div className="access-request-page animate-fade-in">
       <div className="access-request-header">
-        <div><span className="panel-kicker">VIEWER WORKSPACE</span><h1>My Access Requests</h1><p>Request permission, follow the owner’s decision, and see whether a grant is still active.</p></div>
-        <button className="btn btn-ghost btn-icon" onClick={refetch} aria-label="Refresh my access requests" title="Refresh"><RefreshCw size={16} /></button>
+        <div>
+          <span className="panel-kicker">VIEWER WORKSPACE</span>
+          <h1>My Access Requests</h1>
+          <p>Browse available documents and request access, or track the status of your existing requests.</p>
+        </div>
+        <button className="btn btn-ghost btn-icon" onClick={() => { refetch(); refetchCatalog(); }} aria-label="Refresh" title="Refresh"><RefreshCw size={16} /></button>
       </div>
 
+      {/* Summary cards */}
       <div className="request-summary-grid" aria-label="My access request totals">
-        <article className="request-summary-card"><span>Total requests</span><strong>{loading ? '—' : requests.length}</strong><small>Across your workspace</small></article>
-        <article className="request-summary-card"><span>Waiting for review</span><strong>{loading ? '—' : pendingCount}</strong><small>Pending with a document owner</small></article>
-        <article className="request-summary-card"><span>Decisions recorded</span><strong>{loading ? '—' : approvedCount + deniedCount}</strong><small>{approvedCount} approved · {deniedCount} denied</small></article>
+        <article className="request-summary-card">
+          <span>Available documents</span>
+          <strong>{catalogLoading ? '—' : catalogDocs.length}</strong>
+          <small>In your organization</small>
+        </article>
+        <article className="request-summary-card">
+          <span>Waiting for review</span>
+          <strong>{loading ? '—' : pendingCount}</strong>
+          <small>Pending with a document owner</small>
+        </article>
+        <article className="request-summary-card">
+          <span>Decisions recorded</span>
+          <strong>{loading ? '—' : approvedCount + deniedCount}</strong>
+          <small>{approvedCount} approved · {deniedCount} denied</small>
+        </article>
       </div>
 
-      <form onSubmit={submitRequest} className="request-panel request-create-panel">
-        <div className="request-panel-heading"><span className="request-panel-icon"><Key size={17} /></span><div><h2>Request a document</h2><p>{initialDocumentId ? 'The owner’s request link filled in the document for you. Submit below to send your request.' : 'Paste the document ID or request link shared by its owner.'}</p></div></div>
-        <div className="request-form-grid">
-          <label className="request-search-field"><span>Document ID or link</span><input aria-label="Document ID or link" value={documentReference} onChange={(event) => setDocumentReference(event.target.value)} placeholder="Paste the document ID or link" required /></label>
-          <label className="request-search-field"><span>Permission needed</span><select aria-label="Requested permission" value={permission} onChange={(event) => setPermission(event.target.value as 'read' | 'edit')}><option value="read">Read access</option><option value="edit">Edit access</option></select></label>
-          <button type="submit" className="btn-vault-primary request-submit-button" disabled={submitting}>{submitting ? <><RefreshCw size={14} className="animate-spin" /> Sending…</> : <><Key size={14} /> Submit request</>}</button>
-        </div>
-        <p className="request-privacy-note"><ShieldCheck size={13} /> For privacy, the confirmation does not reveal whether a document ID exists in another workspace.</p>
-        {formError && <div className="alert alert-danger" role="alert"><XCircle size={14} />{formError}</div>}
-      </form>
+      {/* Tab navigation */}
+      <div style={{ display: 'flex', gap: '4px', borderBottom: '1px solid var(--color-border)', marginBottom: '1.5rem' }}>
+        {(
+          [['catalog', 'Browse Documents', <FileText size={14} />],
+           ['form', 'Request by ID', <Key size={14} />],
+           ['history', `History · ${requests.length}`, <Clock size={14} />]] as const
+        ).map(([id, label, icon]) => (
+          <button
+            key={id}
+            type="button"
+            onClick={() => setActiveTab(id)}
+            style={{
+              display: 'flex', alignItems: 'center', gap: '6px',
+              padding: '10px 16px', fontSize: '0.8125rem', fontWeight: 600,
+              border: 'none', cursor: 'pointer', borderRadius: '8px 8px 0 0',
+              transition: 'all 0.15s',
+              background: activeTab === id ? 'var(--color-surface-2)' : 'transparent',
+              color: activeTab === id ? 'var(--color-accent)' : 'var(--color-text-muted)',
+              borderBottom: activeTab === id ? '2px solid var(--color-accent)' : '2px solid transparent',
+            }}
+            aria-selected={activeTab === id}
+          >
+            {icon}{label}
+          </button>
+        ))}
+      </div>
 
-      <section className="request-panel">
-        <div className="request-panel-heading request-history-heading"><div><span className="panel-kicker">PRIVATE TO YOUR ACCOUNT</span><h2>Request history</h2></div><span className="request-total">{loading ? 'Loading…' : `${requests.length} request${requests.length === 1 ? '' : 's'}`}</span></div>
-        <div className="request-toolbar">
-          <div className="request-filter-buttons" role="tablist" aria-label="Filter my access requests">
-            {(['all', 'pending', 'approved', 'denied'] as const).map((value) => {
-              const count = value === 'all' ? requests.length : requests.filter((request) => request.status === value).length;
-              return <button key={value} type="button" role="tab" aria-selected={filter === value} className={filter === value ? 'selected' : ''} onClick={() => setFilter(value)}>{value === 'all' ? 'All' : value[0].toUpperCase() + value.slice(1)} <span>{count}</span></button>;
-            })}
+      {/* ── TAB: Browse Catalog ── */}
+      {activeTab === 'catalog' && (
+        <section className="request-panel" style={{ background: 'none', boxShadow: 'none', padding: 0 }}>
+          {/* Filters */}
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '10px', marginBottom: '1rem', alignItems: 'center' }}>
+            <div style={{ position: 'relative', flex: '1 1 220px' }}>
+              <Search size={14} style={{ position: 'absolute', left: 12, top: '50%', transform: 'translateY(-50%)', color: 'var(--color-text-muted)', pointerEvents: 'none' }} aria-hidden />
+              <input
+                style={{ paddingLeft: 36, width: '100%' }}
+                className="vault-input"
+                placeholder="Search documents…"
+                value={catalogSearch}
+                onChange={(e) => setCatalogSearch(e.target.value)}
+                aria-label="Search catalog"
+              />
+            </div>
+            <select
+              className="vault-input"
+              style={{ flex: '0 0 180px' }}
+              value={catalogCategory}
+              onChange={(e) => setCatalogCategory(e.target.value)}
+              aria-label="Filter by category"
+            >
+              <option value="">All categories</option>
+              {catalogCategories.map((cat) => <option key={cat} value={cat}>{cat}</option>)}
+            </select>
+            <button className="btn-vault-secondary" style={{ whiteSpace: 'nowrap' }} onClick={refetchCatalog} type="button">
+              <RefreshCw size={13} /> Refresh
+            </button>
           </div>
-          <label className="request-search"><Search size={15} aria-hidden /><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Find a document or owner" aria-label="Search my requests" /></label>
-        </div>
 
-        {error && <div className="alert alert-danger" role="alert"><XCircle size={14} />{error}<button className="btn btn-ghost btn-sm" onClick={refetch}>Retry</button></div>}
-        {loading ? <div className="request-history-list">{Array.from({ length: 3 }).map((_, index) => <div className="skeleton h-20 w-full" key={index} />)}</div> : visibleRequests.length === 0 ? (
-          <div className="empty-state py-10"><div className="empty-state-icon"><Clock size={25} /></div><h3>{requests.length === 0 ? 'No requests yet' : 'No matching requests'}</h3><p>{requests.length === 0 ? 'A request and each owner decision will appear here.' : 'Try another status or search term.'}</p></div>
-        ) : (
-          <div className="request-history-list">
-            {visibleRequests.map((request) => {
-              const expanded = expandedRequest === request.id;
-              const accessDescription = request.currentAccessStatus === 'active'
-                ? `Active ${request.currentGrantPermission || 'read'} grant${request.currentGrantExpiresAt ? ` · expires ${formatDate(request.currentGrantExpiresAt)}` : ' · no expiry'}`
-                : request.currentAccessStatus === 'expired'
-                  ? `Grant expired ${request.currentGrantExpiresAt ? `on ${formatDate(request.currentGrantExpiresAt)}` : ''}`
-                  : request.currentAccessStatus === 'unavailable'
-                    ? 'Document is archived and unavailable'
-                    : request.status === 'approved'
-                      ? 'No active grant is attached to this request'
-                      : request.status === 'denied' ? 'No access grant was issued' : 'Waiting for the document owner';
-              return <article className="request-history-card" key={request.id}>
-                <div className="request-history-top">
-                  <span className="request-document-icon"><FileText size={17} /></span>
-                  <button className="request-history-title request-history-toggle" type="button" aria-expanded={expanded} onClick={() => setExpandedRequest(expanded ? null : request.id)}><strong>{request.documentTitle}</strong><span>{request.documentOwnerName || 'Document owner'} · {request.documentOwnerEmail || 'Workspace owner'}</span></button>
-                  <StatusBadge status={request.status} />
-                </div>
-                <div className="request-history-meta"><span><Key size={13} /> Requested <b>{request.targetPermission}</b></span><span><Clock size={13} /> Sent {formatDate(request.createdAt)}</span><span className={request.currentAccessStatus === 'active' ? 'request-access-active' : ''}><ShieldCheck size={13} /> {accessDescription}</span></div>
-                {expanded && <div className="request-detail-grid">
-                  <div><span>Request ID</span><code>{request.id}</code></div>
-                  <div><span>Document ID</span><code>{request.documentId}</code></div>
-                  <div><span>Owner</span><strong>{request.documentOwnerName || 'Workspace owner'}<small>{request.documentOwnerEmail}</small></strong></div>
-                  <div><span>Decision</span><strong>{request.status === 'pending' ? 'Awaiting review' : `${request.status[0].toUpperCase()}${request.status.slice(1)}${request.reviewedAt ? ` · ${formatDate(request.reviewedAt)}` : ''}`}{request.reviewerName && <small>By {request.reviewerName}</small>}</strong></div>
-                  {request.reviewerNotes && <div className="request-reviewer-note"><span>Owner note</span><p>{request.reviewerNotes}</p></div>}
-                  <div className="request-detail-actions">
-                    {request.currentAccessStatus === 'active' && !request.documentDeleted && <button className="btn-vault-primary" type="button" onClick={() => onOpenDocument(request.documentId)}><Eye size={13} /> Open document</button>}
-                    <button className="btn-vault-secondary" type="button" onClick={async () => { try { await navigator.clipboard.writeText(request.documentId); addToast('Document ID copied.', 'success'); } catch { addToast('Clipboard access is unavailable.', 'warning'); } }}><Copy size={13} /> Copy document ID</button>
+          {catalogError && (
+            <div className="alert alert-danger" role="alert"><XCircle size={14} />{catalogError}<button className="btn btn-ghost btn-sm" onClick={refetchCatalog}>Retry</button></div>
+          )}
+
+          {catalogLoading ? (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+              {Array.from({ length: 5 }).map((_, i) => <div key={i} className="skeleton" style={{ height: 72, borderRadius: 10 }} />)}
+            </div>
+          ) : visibleCatalog.length === 0 ? (
+            <div className="empty-state py-10">
+              <div className="empty-state-icon"><FileText size={26} /></div>
+              <h3>{catalogDocs.length === 0 ? 'No documents in workspace yet' : 'No matching documents'}</h3>
+              <p>{catalogDocs.length === 0 ? 'Owners haven\'t uploaded any documents yet.' : 'Try a different search or category.'}</p>
+            </div>
+          ) : (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+              {visibleCatalog.map((doc) => {
+                const isPending = pendingDocIds.has(doc.id);
+                const isRequesting = requestingDocId === doc.id;
+                return (
+                  <div
+                    key={doc.id}
+                    style={{
+                      display: 'flex', alignItems: 'center', gap: 16,
+                      padding: '14px 18px',
+                      background: 'var(--color-surface-2)',
+                      border: '1px solid var(--color-border)',
+                      borderRadius: 10,
+                      transition: 'border-color 0.15s',
+                    }}
+                  >
+                    {/* File icon */}
+                    <div style={{
+                      width: 38, height: 38, borderRadius: 8, flexShrink: 0,
+                      background: doc.hasAccess ? 'rgba(52,211,153,0.12)' : 'var(--color-surface-3)',
+                      border: `1px solid ${doc.hasAccess ? 'rgba(52,211,153,0.3)' : 'var(--color-border)'}`,
+                      display: 'flex', alignItems: 'center', justifyContent: 'center',
+                      color: doc.hasAccess ? 'var(--color-success)' : 'var(--color-text-muted)',
+                    }}>
+                      <FileText size={17} />
+                    </div>
+
+                    {/* Doc info */}
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                        <span style={{ fontWeight: 600, color: 'var(--color-text-primary)', fontSize: '0.875rem' }}>{doc.title}</span>
+                        <span style={{
+                          fontSize: '0.7rem', fontWeight: 600, padding: '2px 7px',
+                          borderRadius: 99, letterSpacing: '0.03em',
+                          background: 'var(--color-surface-3)', color: 'var(--color-text-muted)',
+                          border: '1px solid var(--color-border)',
+                        }}>{doc.category}</span>
+                        {doc.hasAccess && (
+                          <span style={{
+                            fontSize: '0.7rem', fontWeight: 600, padding: '2px 7px',
+                            borderRadius: 99, background: 'rgba(52,211,153,0.15)',
+                            color: 'var(--color-success)', border: '1px solid rgba(52,211,153,0.3)',
+                          }}>
+                            <ShieldCheck size={10} style={{ display: 'inline', marginRight: 3 }} />
+                            {doc.myPermission === 'owner' ? 'You own this' : `${doc.myPermission} access`}
+                          </span>
+                        )}
+                        {isPending && !doc.hasAccess && (
+                          <span style={{
+                            fontSize: '0.7rem', fontWeight: 600, padding: '2px 7px',
+                            borderRadius: 99, background: 'rgba(251,191,36,0.15)',
+                            color: 'var(--color-warning)', border: '1px solid rgba(251,191,36,0.3)',
+                          }}>
+                            <Clock size={10} style={{ display: 'inline', marginRight: 3 }} /> Pending
+                          </span>
+                        )}
+                      </div>
+                      <div style={{ fontSize: '0.75rem', color: 'var(--color-text-muted)', marginTop: 2 }}>
+                        Owner: {doc.ownerName} · {doc.ownerEmail}
+                        {doc.description && <span style={{ marginLeft: 8 }}>— {doc.description.slice(0, 60)}{doc.description.length > 60 ? '…' : ''}</span>}
+                      </div>
+                    </div>
+
+                    {/* Action */}
+                    <div style={{ flexShrink: 0 }}>
+                      {doc.hasAccess ? (
+                        doc.myPermission !== 'owner' ? (
+                          <button
+                            className="btn-vault-secondary"
+                            style={{ fontSize: '0.75rem', padding: '6px 12px' }}
+                            onClick={() => onOpenDocument(doc.id)}
+                          >
+                            <Eye size={13} /> Open
+                          </button>
+                        ) : null
+                      ) : isPending ? (
+                        <button className="btn-vault-secondary" style={{ fontSize: '0.75rem', padding: '6px 12px' }} disabled>
+                          <Clock size={13} /> Pending
+                        </button>
+                      ) : (
+                        <button
+                          className="btn-vault-primary"
+                          style={{ fontSize: '0.75rem', padding: '6px 14px' }}
+                          disabled={isRequesting}
+                          onClick={() => requestAccessFromCatalog(doc, 'read')}
+                        >
+                          {isRequesting ? <><RefreshCw size={13} className="animate-spin" /> Sending…</> : <><Key size={13} /> Request Access</>}
+                        </button>
+                      )}
+                    </div>
                   </div>
-                </div>}
-              </article>;
-            })}
+                );
+              })}
+            </div>
+          )}
+        </section>
+      )}
+
+      {/* ── TAB: Request by Document ID ── */}
+      {activeTab === 'form' && (
+        <form onSubmit={submitRequest} className="request-panel request-create-panel">
+          <div className="request-panel-heading">
+            <span className="request-panel-icon"><Key size={17} /></span>
+            <div>
+              <h2>Request by document ID</h2>
+              <p>{initialDocumentId ? "The owner's request link filled in the document for you. Submit below to send your request." : 'Paste the document ID or request link shared by its owner.'}</p>
+            </div>
           </div>
-        )}
-      </section>
+          <div className="request-form-grid">
+            <label className="request-search-field">
+              <span>Document ID or link</span>
+              <input aria-label="Document ID or link" value={documentReference} onChange={(e) => setDocumentReference(e.target.value)} placeholder="Paste the document ID or link" required />
+            </label>
+            <label className="request-search-field">
+              <span>Permission needed</span>
+              <select aria-label="Requested permission" value={permission} onChange={(e) => setPermission(e.target.value as 'read' | 'edit')}>
+                <option value="read">Read access</option>
+                <option value="edit">Edit access</option>
+              </select>
+            </label>
+            <button type="submit" className="btn-vault-primary request-submit-button" disabled={submitting}>
+              {submitting ? <><RefreshCw size={14} className="animate-spin" /> Sending…</> : <><Key size={14} /> Submit request</>}
+            </button>
+          </div>
+          <p className="request-privacy-note"><ShieldCheck size={13} /> For privacy, the confirmation does not reveal whether a document ID exists in another workspace.</p>
+          {formError && <div className="alert alert-danger" role="alert"><XCircle size={14} />{formError}</div>}
+        </form>
+      )}
+
+      {/* ── TAB: Request History ── */}
+      {activeTab === 'history' && (
+        <section className="request-panel">
+          <div className="request-panel-heading request-history-heading">
+            <div><span className="panel-kicker">PRIVATE TO YOUR ACCOUNT</span><h2>Request history</h2></div>
+            <span className="request-total">{loading ? 'Loading…' : `${requests.length} request${requests.length === 1 ? '' : 's'}`}</span>
+          </div>
+          <div className="request-toolbar">
+            <div className="request-filter-buttons" role="tablist" aria-label="Filter my access requests">
+              {(['all', 'pending', 'approved', 'denied'] as const).map((value) => {
+                const count = value === 'all' ? requests.length : requests.filter((r) => r.status === value).length;
+                return (
+                  <button key={value} type="button" role="tab" aria-selected={filter === value} className={filter === value ? 'selected' : ''} onClick={() => setFilter(value)}>
+                    {value === 'all' ? 'All' : value[0].toUpperCase() + value.slice(1)} <span>{count}</span>
+                  </button>
+                );
+              })}
+            </div>
+            <label className="request-search">
+              <Search size={15} aria-hidden />
+              <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Find a document or owner" aria-label="Search my requests" />
+            </label>
+          </div>
+
+          {error && <div className="alert alert-danger" role="alert"><XCircle size={14} />{error}<button className="btn btn-ghost btn-sm" onClick={refetch}>Retry</button></div>}
+          {loading ? (
+            <div className="request-history-list">{Array.from({ length: 3 }).map((_, i) => <div className="skeleton h-20 w-full" key={i} />)}</div>
+          ) : visibleRequests.length === 0 ? (
+            <div className="empty-state py-10">
+              <div className="empty-state-icon"><Clock size={25} /></div>
+              <h3>{requests.length === 0 ? 'No requests yet' : 'No matching requests'}</h3>
+              <p>{requests.length === 0 ? 'Browse the catalog and request access to get started.' : 'Try another status or search term.'}</p>
+              {requests.length === 0 && <button className="btn-vault-primary mt-4" onClick={() => setActiveTab('catalog')}><FileText size={14} /> Browse documents</button>}
+            </div>
+          ) : (
+            <div className="request-history-list">
+              {visibleRequests.map((request) => {
+                const expanded = expandedRequest === request.id;
+                const accessDescription = request.currentAccessStatus === 'active'
+                  ? `Active ${request.currentGrantPermission || 'read'} grant${request.currentGrantExpiresAt ? ` · expires ${formatDate(request.currentGrantExpiresAt)}` : ' · no expiry'}`
+                  : request.currentAccessStatus === 'expired'
+                    ? `Grant expired ${request.currentGrantExpiresAt ? `on ${formatDate(request.currentGrantExpiresAt)}` : ''}`
+                    : request.currentAccessStatus === 'unavailable'
+                      ? 'Document is archived and unavailable'
+                      : request.status === 'approved'
+                        ? 'No active grant is attached to this request'
+                        : request.status === 'denied' ? 'No access grant was issued' : 'Waiting for the document owner';
+                return (
+                  <article className="request-history-card" key={request.id}>
+                    <div className="request-history-top">
+                      <span className="request-document-icon"><FileText size={17} /></span>
+                      <button className="request-history-title request-history-toggle" type="button" aria-expanded={expanded} onClick={() => setExpandedRequest(expanded ? null : request.id)}>
+                        <strong>{request.documentTitle}</strong>
+                        <span>{request.documentOwnerName || 'Document owner'} · {request.documentOwnerEmail || 'Workspace owner'}</span>
+                      </button>
+                      <StatusBadge status={request.status} />
+                    </div>
+                    <div className="request-history-meta">
+                      <span><Key size={13} /> Requested <b>{request.targetPermission}</b></span>
+                      <span><Clock size={13} /> Sent {formatDate(request.createdAt)}</span>
+                      <span className={request.currentAccessStatus === 'active' ? 'request-access-active' : ''}>
+                        <ShieldCheck size={13} /> {accessDescription}
+                      </span>
+                    </div>
+                    {expanded && (
+                      <div className="request-detail-grid">
+                        <div><span>Request ID</span><code>{request.id}</code></div>
+                        <div><span>Document ID</span><code>{request.documentId}</code></div>
+                        <div><span>Owner</span><strong>{request.documentOwnerName || 'Workspace owner'}<small>{request.documentOwnerEmail}</small></strong></div>
+                        <div><span>Decision</span><strong>{request.status === 'pending' ? 'Awaiting review' : `${request.status[0].toUpperCase()}${request.status.slice(1)}${request.reviewedAt ? ` · ${formatDate(request.reviewedAt)}` : ''}`}{request.reviewerName && <small>By {request.reviewerName}</small>}</strong></div>
+                        {request.reviewerNotes && <div className="request-reviewer-note"><span>Owner note</span><p>{request.reviewerNotes}</p></div>}
+                        <div className="request-detail-actions">
+                          {request.currentAccessStatus === 'active' && !request.documentDeleted && (
+                            <button className="btn-vault-primary" type="button" onClick={() => onOpenDocument(request.documentId)}><Eye size={13} /> Open document</button>
+                          )}
+                          <button className="btn-vault-secondary" type="button" onClick={async () => { try { await navigator.clipboard.writeText(request.documentId); addToast('Document ID copied.', 'success'); } catch { addToast('Clipboard access is unavailable.', 'warning'); } }}><Copy size={13} /> Copy document ID</button>
+                        </div>
+                      </div>
+                    )}
+                  </article>
+                );
+              })}
+            </div>
+          )}
+        </section>
+      )}
     </div>
   );
 }
@@ -2221,6 +2621,7 @@ function AppShell({ initialUser, initialRequestDocumentId, onRequestLinkHandled 
 
   return (
     <div className="app-layout">
+        <a className="skip-link" href="#main-content">Skip to main content</a>
         <Sidebar active={view} onNavigate={(v) => setView(v)} user={user} />
 
         <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minWidth: 0 }}>
@@ -2258,7 +2659,7 @@ function AppShell({ initialUser, initialRequestDocumentId, onRequestLinkHandled 
             </div>
           </header>
 
-          <main className="app-main" id="main-content" role="main">
+          <main className="app-main" id="main-content" role="main" tabIndex={-1}>
             {renderView()}
           </main>
         </div>

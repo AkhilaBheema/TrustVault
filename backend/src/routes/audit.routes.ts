@@ -166,11 +166,10 @@ export async function auditRoutes(app: FastifyInstance) {
         totalRecords: result.totalRecords,
         // Only expose the sequence number of the first break, not any hash
         brokenAtSequence: result.brokenAtSequence ?? null,
-        errorReason: result.errorReason ?? null,
         verifiedAt: new Date().toISOString(),
         message: result.isValid
           ? `Chain intact: all ${result.totalRecords} records verified.`
-          : `⚠️ CHAIN BROKEN at sequence #${result.brokenAtSequence}: ${result.errorReason}`,
+          : `Audit chain verification failed at sequence #${result.brokenAtSequence}.`,
       });
     }
   );

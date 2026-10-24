@@ -27,13 +27,37 @@ export class AuditService {
     prevHash: string,
     sequenceNumber: number,
     eventType: string,
+    actorId: string | null,
     actorEmail: string | null,
+    organizationId: string | null,
+    targetType: string | null,
+    targetId: string | null,
     action: string,
     status: string,
+    reason: string | null,
+    ipAddress: string | null,
+    userAgent: string | null,
+    createdAt: string,
     payload: unknown
   ): string {
     const canonicalPayload = CryptoService.canonicalJson(payload);
-    const hashData = `${prevHash}|${sequenceNumber}|${eventType}|${actorEmail || 'NONE'}|${action}|${status}|${canonicalPayload}`;
+    const hashData = CryptoService.canonicalJson({
+      prevHash,
+      sequenceNumber,
+      eventType,
+      actorId,
+      actorEmail,
+      organizationId,
+      targetType,
+      targetId,
+      action,
+      status,
+      reason,
+      ipAddress,
+      userAgent,
+      createdAt,
+      payload: canonicalPayload,
+    });
     return CryptoService.sha256(hashData);
   }
 
@@ -62,14 +86,23 @@ export class AuditService {
         nextSeq = parseInt(lastRowRes.rows[0].sequence_number, 10) + 1;
       }
 
+      const createdAt = new Date().toISOString();
       const safePayload = CryptoService.canonicalJson(params.payload || {});
       const currentHash = this.computeEventHash(
         prevHash,
         nextSeq,
         params.eventType,
+        params.actorId || null,
         params.actorEmail || null,
+        params.organizationId || null,
+        params.targetType || null,
+        params.targetId || null,
         params.action,
         params.status,
+        params.reason || null,
+        params.ipAddress || null,
+        params.userAgent || null,
+        createdAt,
         params.payload || {}
       );
 
@@ -77,8 +110,8 @@ export class AuditService {
         `INSERT INTO audit_events (
            sequence_number, event_type, actor_id, actor_email, organization_id,
            target_type, target_id, action, status, reason, ip_address, user_agent,
-           payload, prev_hash, current_hash
-         ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13::jsonb, $14, $15)
+           payload, prev_hash, current_hash, created_at
+         ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13::jsonb, $14, $15, $16)
          RETURNING id;`,
         [
           nextSeq,
@@ -96,6 +129,7 @@ export class AuditService {
           safePayload,
           prevHash,
           currentHash,
+          createdAt,
         ]
       );
 
@@ -123,9 +157,17 @@ export class AuditService {
     const res = await pool.query<{
       sequence_number: string;
       event_type: string;
+      actor_id: string | null;
       actor_email: string | null;
+      organization_id: string | null;
+      target_type: string | null;
+      target_id: string | null;
       action: string;
       status: string;
+      reason: string | null;
+      ip_address: string | null;
+      user_agent: string | null;
+      created_at: Date;
       payload: unknown;
       prev_hash: string;
       current_hash: string;
@@ -144,11 +186,12 @@ export class AuditService {
 
       // Check prev_hash matches prior block's current_hash
       if (row.prev_hash !== expectedPrevHash) {
+        console.error(`[AUDIT_VERIFY] Broken link at sequence ${seq}`);
         return {
           isValid: false,
           totalRecords: rows.length,
           brokenAtSequence: seq,
-          errorReason: `Broken link: row sequence ${seq} prev_hash (${row.prev_hash}) does not match expected (${expectedPrevHash})`,
+          errorReason: 'Broken audit-chain link',
         };
       }
 
@@ -157,13 +200,22 @@ export class AuditService {
         row.prev_hash,
         seq,
         row.event_type,
+        row.actor_id,
         row.actor_email,
+        row.organization_id,
+        row.target_type,
+        row.target_id,
         row.action,
         row.status,
+        row.reason,
+        row.ip_address,
+        row.user_agent,
+        row.created_at.toISOString(),
         row.payload
       );
 
       if (recomputedHash !== row.current_hash) {
+        console.error(`[AUDIT_VERIFY] Hash mismatch at sequence ${seq}`);
         return {
           isValid: false,
           totalRecords: rows.length,

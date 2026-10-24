@@ -74,6 +74,10 @@ export const api = {
   auth: {
     login: (email: string, password: string) =>
       request<{ user: User; csrfToken: string }>('POST', '/auth/login', { email, password }),
+    sendOtp: (email: string, name?: string, mode: 'register' | 'login' = 'login') =>
+      request<{ message: string }>('POST', '/auth/send-otp', { email, name, mode }),
+    verifyOtp: (email: string, otp: string, name?: string) =>
+      request<{ user: User; csrfToken: string }>('POST', '/auth/verify-otp', { email, otp, name }),
     logout: () => request<void>('POST', '/auth/logout'),
     me: () => request<{ user: User; csrfToken: string }>('GET', '/auth/me'),
   },
@@ -83,6 +87,10 @@ export const api = {
     list: (params?: Record<string, string>) => {
       const qs = params ? '?' + new URLSearchParams(params).toString() : '';
       return request<{ documents: Document[] }>('GET', `/documents${qs}`);
+    },
+    catalog: (params?: Record<string, string>) => {
+      const qs = params ? '?' + new URLSearchParams(params).toString() : '';
+      return request<{ documents: CatalogDocument[] }>('GET', `/documents/catalog${qs}`);
     },
     get: (id: string) => request<{ document: Document; versions: DocumentVersion[] }>('GET', `/documents/${id}`),
     upload: (formData: FormData) => request<Document>('POST', '/documents', formData, true),
@@ -97,6 +105,20 @@ export const api = {
   tickets: {
     issue: (docId: string) =>
       request<{ rawTicket: string; expiresAt: string }>('POST', `/documents/${docId}/download-ticket`),
+    download: async (docId: string, rawTicket: string) => {
+      const res = await fetch(
+        `${API_BASE_URL}/documents/${encodeURIComponent(docId)}/download?ticket=${encodeURIComponent(rawTicket)}`,
+        { credentials: 'include', referrerPolicy: 'no-referrer' }
+      );
+      if (!res.ok) {
+        const body = await res.json().catch(() => null) as { message?: string } | null;
+        throw new ApiError(res.status, body?.message || 'Download failed');
+      }
+      return {
+        blob: await res.blob(),
+        filename: res.headers.get('content-disposition')?.match(/filename="([^"]+)"/)?.[1] || 'document',
+      };
+    },
   },
 
   // ── Grants ───────────────────────────────────────────────────
@@ -220,6 +242,20 @@ export interface Document {
   createdAt: string;
   updatedAt: string;
   effectivePermission?: 'owner' | 'read' | 'edit';
+}
+
+/** Lightweight catalog entry — no content, no version details. */
+export interface CatalogDocument {
+  id: string;
+  title: string;
+  description: string;
+  category: string;
+  ownerId: string;
+  ownerName: string;
+  ownerEmail: string;
+  myPermission: 'owner' | 'read' | 'edit' | null;
+  hasAccess: boolean;
+  createdAt: string;
 }
 
 export interface DocumentVersion {

@@ -10,7 +10,7 @@ const createUserSchema = z.object({
   email: z.string().trim().email('Invalid email address'),
   name: z.string().trim().min(2, 'Name must be at least 2 characters'),
   role: z.enum(['admin', 'owner', 'viewer']),
-  initialPassword: z.string().min(8, 'Password must be at least 8 characters'),
+  initialPassword: z.string().min(12, 'Password must be at least 12 characters'),
 });
 
 const updateUserStatusSchema = z.object({

@@ -6,9 +6,9 @@ All requests must use `Content-Type: application/json` unless multipart. State-c
 - `POST /api/auth/login` - Public (rate-limited). Body: `{ email, password }`. Sets session cookie, returns user & CSRF token.
 - `POST /api/auth/logout` - Authenticated. Revokes current session from DB immediately.
 - `GET /api/auth/me` - Authenticated. Returns current user profile.
-- `POST /api/admin/users` - Admin only. Body: `{ email, password, role }`. Creates user in caller's organization.
-- `PATCH /api/admin/users/:id/disable` - Admin only. Toggles user `is_active` status.
-- `POST /api/admin/users/:id/revoke-sessions` - Admin only. Immediately deletes all active DB sessions for user.
+- `POST /api/admin/users` - Admin only. Body: `{ email, name, role, initialPassword }`. Creates user in caller's organization; passwords must be at least 12 characters.
+- `PATCH /api/admin/users/:id/status` - Admin only. Body: `{ isDisabled }`.
+- `POST /api/admin/users/:id/force-logout` - Admin only. Immediately deletes all active DB sessions for user.
 
 ## Documents & Grants (Authorization Chokepoint)
 *All document access is evaluated via `AuthorizationService.authorize()`. Unshared or missing documents return identical 404 with uniform timing.*
@@ -30,7 +30,7 @@ All requests must use `Content-Type: application/json` unless multipart. State-c
 - `POST /api/documents/:id/grants/revoke-all` - Owner only. Immediate emergency revocation of all third-party grants.
 - `POST /api/documents/:id/access-requests` - Authenticated Viewer without access. Neutral request submission (reveals zero doc metadata).
 - `GET /api/access-requests` - Owner. Lists pending requests for documents owned by caller.
-- `POST /api/access-requests/:id/review` - Owner. Body: `{ approved: boolean, permission?, expiresAt? }`.
+- `POST /api/access-requests/:id/review` - Owner. Body: `{ decision: 'approve'|'deny', permission?, expiresAt?, reviewerNotes? }`. Future-dated expiry is required when supplied.
 
 ## AI Suggestions & Audit
 - `GET /api/documents/:id/suggestions` - Owner only. Returns AI or deterministic permission suggestions based on category and history. Does NOT grant permissions.

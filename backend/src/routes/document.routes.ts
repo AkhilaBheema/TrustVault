@@ -9,23 +9,115 @@ import { TicketService } from '../services/ticket.service.js';
 import { GrantService } from '../services/grant.service.js';
 import { StorageService } from '../services/storage.service.js';
 import { EncryptionService } from '../services/encryption.service.js';
+import { CryptoService } from '../services/crypto.service.js';
 import { AuditService } from '../services/audit.service.js';
 import { pool } from '../db/index.js';
 
 export async function documentRoutes(app: FastifyInstance) {
+  // 0. Document Catalog — browse ALL non-deleted org documents for access-requesting
+  //    Intentionally leaks only: id, title, category, owner name.
+  //    No file content, no grant details, no version info.
+  app.get('/api/documents/catalog', { preHandler: [authenticate] }, async (request, reply) => {
+    const user = request.user!;
+    const query = request.query as Record<string, string | undefined>;
+    const search = query.search?.trim() || '';
+    const category = query.category?.trim() || '';
+
+    const params: unknown[] = [user.organizationId];
+    let sql = `
+      SELECT
+        d.id,
+        d.title,
+        d.description,
+        d.category,
+        d.owner_id,
+        d.created_at,
+        u.name  AS owner_name,
+        u.email AS owner_email,
+        CASE WHEN d.owner_id = $2 THEN 'owner'
+             ELSE COALESCE(g.permission, NULL)
+        END AS my_permission,
+        g.id IS NOT NULL AS has_grant
+      FROM documents d
+      JOIN users u ON d.owner_id = u.id
+      LEFT JOIN document_grants g
+        ON g.document_id = d.id
+        AND g.user_id = $2
+        AND (g.expires_at IS NULL OR g.expires_at > NOW())
+      WHERE d.organization_id = $1
+        AND d.is_deleted = FALSE
+    `;
+    params.push(user.id); // $2
+
+    if (search) {
+      params.push(`%${search}%`);
+      sql += ` AND (d.title ILIKE $${params.length} OR d.description ILIKE $${params.length})`;
+    }
+    if (category) {
+      params.push(category);
+      sql += ` AND d.category = $${params.length}`;
+    }
+
+    sql += ` ORDER BY d.created_at DESC;`;
+
+    const res = await pool.query<{
+      id: string;
+      title: string;
+      description: string;
+      category: string;
+      owner_id: string;
+      owner_name: string;
+      owner_email: string;
+      my_permission: string | null;
+      has_grant: boolean;
+      created_at: Date;
+    }>(sql, params);
+
+    return reply.status(200).send({
+      documents: res.rows.map((row) => ({
+        id: row.id,
+        title: row.title,
+        description: row.description,
+        category: row.category,
+        ownerId: row.owner_id,
+        ownerName: row.owner_name,
+        ownerEmail: row.owner_email,
+        myPermission: row.my_permission,    // 'owner' | 'read' | 'edit' | null
+        hasAccess: row.has_grant || row.owner_id === user.id,
+        createdAt: row.created_at,
+      })),
+    });
+  });
+
   // 1. List / Search accessible documents (Repository query scoped in SQL)
   app.get('/api/documents', { preHandler: [authenticate] }, async (request, reply) => {
     const user = request.user!;
     const query = request.query as Record<string, string | undefined>;
-
-    const filters = {
-      search: query.search,
-      category: query.category,
-      ownerId: query.ownerId,
-      fromDate: query.fromDate ? new Date(query.fromDate) : undefined,
-      toDate: query.toDate ? new Date(query.toDate) : undefined,
-      onlyDeleted: query.onlyDeleted === 'true',
+    const parseDate = (value: string | undefined, field: string) => {
+      if (!value) return undefined;
+      const parsed = new Date(value);
+      if (Number.isNaN(parsed.getTime())) {
+        throw new Error(`Invalid ${field} date`);
+      }
+      return parsed;
     };
+
+    let filters;
+    try {
+      filters = {
+        search: query.search,
+        category: query.category,
+        ownerId: query.ownerId,
+        fromDate: parseDate(query.fromDate, 'fromDate'),
+        toDate: parseDate(query.toDate, 'toDate'),
+        onlyDeleted: query.onlyDeleted === 'true',
+      };
+    } catch (error) {
+      return reply.status(400).send({
+        error: 'Bad Request',
+        message: error instanceof Error ? error.message : 'Invalid date filter',
+      });
+    }
 
     const documents = await DocumentRepository.listAccessibleDocuments(user, filters);
     return reply.status(200).send({ documents });
@@ -241,8 +333,9 @@ export async function documentRoutes(app: FastifyInstance) {
       dek_iv: string;
       file_iv: string;
       file_auth_tag: string;
+      sha256_hash: string;
     }>(
-      `SELECT storage_path, original_filename, mime_type, encrypted_dek, dek_iv, file_iv, file_auth_tag
+      `SELECT storage_path, original_filename, mime_type, sha256_hash, encrypted_dek, dek_iv, file_iv, file_auth_tag
        FROM document_versions
        WHERE id = $1;`,
       [ticket.versionId]
@@ -266,6 +359,22 @@ export async function documentRoutes(app: FastifyInstance) {
       version.file_iv,
       version.file_auth_tag
     );
+    if (CryptoService.sha256(decryptedBytes) !== version.sha256_hash) {
+      await AuditService.log({
+        eventType: 'SECURITY_ALERT',
+        action: 'DOCUMENT_INTEGRITY_FAILURE',
+        status: 'ERROR',
+        actorId: user.id,
+        actorEmail: user.email,
+        organizationId: user.organizationId,
+        targetType: 'DOCUMENT',
+        targetId: id,
+        reason: 'Decrypted document digest did not match persisted metadata',
+        ipAddress: request.ip,
+        userAgent: request.headers['user-agent'] || null,
+      });
+      return reply.status(500).send({ error: 'InternalServerError', message: 'Document integrity verification failed.' });
+    }
 
     await AuditService.log({
       eventType: 'DOCUMENT_LIFECYCLE',
@@ -309,8 +418,9 @@ export async function documentRoutes(app: FastifyInstance) {
       dek_iv: string;
       file_iv: string;
       file_auth_tag: string;
+      sha256_hash: string;
     }>(
-      `SELECT storage_path, original_filename, mime_type, encrypted_dek, dek_iv, file_iv, file_auth_tag
+      `SELECT storage_path, original_filename, mime_type, sha256_hash, encrypted_dek, dek_iv, file_iv, file_auth_tag
        FROM document_versions
        WHERE document_id = $1
        ORDER BY version_number DESC
@@ -351,6 +461,22 @@ export async function documentRoutes(app: FastifyInstance) {
       version.file_iv,
       version.file_auth_tag
     );
+    if (CryptoService.sha256(decryptedBytes) !== version.sha256_hash) {
+      await AuditService.log({
+        eventType: 'SECURITY_ALERT',
+        action: 'DOCUMENT_INTEGRITY_FAILURE',
+        status: 'ERROR',
+        actorId: user.id,
+        actorEmail: user.email,
+        organizationId: user.organizationId,
+        targetType: 'DOCUMENT',
+        targetId: id,
+        reason: 'Decrypted preview digest did not match persisted metadata',
+        ipAddress: request.ip,
+        userAgent: request.headers['user-agent'] || null,
+      });
+      return reply.status(500).send({ error: 'InternalServerError', message: 'Document integrity verification failed.' });
+    }
 
     await AuditService.log({
       eventType: 'DOCUMENT_LIFECYCLE',
@@ -523,6 +649,12 @@ export async function documentRoutes(app: FastifyInstance) {
         return reply.status(400).send({
           error: 'Bad Request',
           message: parsed.error.errors[0]?.message || 'Invalid grant data',
+        });
+      }
+      if (parsed.data.expiresAt && new Date(parsed.data.expiresAt) <= new Date()) {
+        return reply.status(400).send({
+          error: 'Bad Request',
+          message: 'expiresAt must be in the future',
         });
       }
 

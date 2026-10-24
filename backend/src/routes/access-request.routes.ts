@@ -83,6 +83,12 @@ export async function accessRequestRoutes(app: FastifyInstance) {
       }
 
       const { decision, permission, expiresAt, reviewerNotes } = parsed.data;
+      if (expiresAt && new Date(expiresAt) <= new Date()) {
+        return reply.status(400).send({
+          error: 'Bad Request',
+          message: 'expiresAt must be in the future',
+        });
+      }
 
       const result = await AccessRequestService.reviewRequest(
         user,

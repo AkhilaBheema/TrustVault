@@ -2,12 +2,13 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { PGlite } from '@electric-sql/pglite';
-import { loadEnvironment } from './config/env.js';
+import { loadEnvironment, validateProductionEnvironment } from './config/env.js';
 import { buildApp } from './app.js';
 import { pool, setDatabasePool, DatabasePool, DatabaseClient } from './db/index.js';
 import { runSeed } from '../../db/seed.js';
 
 loadEnvironment();
+validateProductionEnvironment();
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -58,8 +59,14 @@ async function ensureDatabase() {
     await Promise.race([testPromise, timeoutPromise]);
     console.log('[DATABASE] Connected to external PostgreSQL database.');
     await runSeed(pool);
-  } catch {
-    console.log('[DATABASE] External PostgreSQL not reachable. Booting embedded PostgreSQL (PGlite)...');
+  } catch (error) {
+    if (process.env.NODE_ENV === 'production') {
+      throw new Error('Unable to connect to the configured PostgreSQL database', { cause: error });
+    }
+    const reason = error instanceof Error ? error.message : 'unknown connection error';
+    console.warn(`[DATABASE] PostgreSQL unavailable at ${process.env.DATABASE_URL || 'the configured database'}: ${reason}`);
+    console.warn('[DATABASE] Development fallback: booting embedded PostgreSQL (PGlite). Start PostgreSQL or Docker to use the configured database.');
+    console.log('[DATABASE] Booting embedded PostgreSQL (PGlite)...');
     const db = new PGlite();
     const pglitePool = createPGlitePool(db);
     setDatabasePool(pglitePool);

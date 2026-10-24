@@ -556,3 +556,19 @@ html[data-theme='light'] .auth-card { box-shadow: 0 20px 55px rgba(35,45,34,.07)
   .sidebar-nav-item { min-width: 46px; font-size: .44rem; }
   .app-main { padding-right: 10px; padding-left: 10px; }
 }
+.skip-link {
+  position: fixed;
+  top: 0.75rem;
+  left: 0.75rem;
+  z-index: 1000;
+  transform: translateY(-180%);
+  padding: 0.65rem 0.9rem;
+  border-radius: 0.5rem;
+  background: var(--color-accent);
+  color: #07111f;
+  font-weight: 700;
+}
+
+.skip-link:focus {
+  transform: translateY(0);
+}
