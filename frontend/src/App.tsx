@@ -358,6 +358,8 @@ function LoginPage({ onLogin, mode, onHome, onSwitchMode, inviteToken, requestDo
     try {
       const res = await api.auth.login(email.trim(), password);
       saveCsrfToken(res.csrfToken);
+      const session = await api.auth.me();
+      saveCsrfToken(session.csrfToken);
       if (inviteToken) {
         try {
           const accepted = await api.invites.accept(inviteToken);
@@ -369,8 +371,8 @@ function LoginPage({ onLogin, mode, onHome, onSwitchMode, inviteToken, requestDo
       if (inviteToken || requestDocumentId) {
         window.history.replaceState({}, '', `${window.location.pathname}${window.location.search}#/login`);
       }
-      onLogin(res.user);
-      addToast(`Welcome back, ${res.user.name}!`, 'success');
+      onLogin(session.user);
+      addToast(`Welcome back, ${session.user.name}!`, 'success');
     } catch (err) {
       setError(err instanceof ApiError ? err.message : 'Invalid email or password.');
     } finally { setLoading(false); }

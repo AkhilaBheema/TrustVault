@@ -26,6 +26,13 @@ export function buildApp(options: AppOptions = {}): FastifyInstance {
     trustProxy: process.env.TRUST_PROXY === 'true',
   });
 
+  app.addHook('onSend', async (request, reply, payload) => {
+    if (request.url.startsWith('/api/')) {
+      reply.header('Cache-Control', 'no-store');
+    }
+    return payload;
+  });
+
   // 1. Security Headers (Helmet)
   app.register(helmet, {
     contentSecurityPolicy: {
