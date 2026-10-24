@@ -346,29 +346,31 @@ function LoginPage({ onLogin, mode, onHome, onSwitchMode, inviteToken, requestDo
   inviteToken?: string | null;
   requestDocumentId?: string | null;
 }) {
-  // OTP flow state
   const [step, setStep] = useState<'email' | 'otp'>('email');
   const [email, setEmail] = useState('');
   const [name, setName] = useState('');
   const [otp, setOtp] = useState('');
+  const [role, setRole] = useState<'owner' | 'viewer'>('viewer');
+  const [adminMode, setAdminMode] = useState(false);
+  const [adminPassword, setAdminPassword] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [countdown, setCountdown] = useState(0);
   const addToast = useToast();
 
-  // Resend countdown
   useEffect(() => {
     if (countdown <= 0) return;
     const t = setTimeout(() => setCountdown(c => c - 1), 1000);
     return () => clearTimeout(t);
   }, [countdown]);
 
+  const reset = () => { setStep('email'); setOtp(''); setError(''); setAdminMode(false); setAdminPassword(''); };
+
   const handleSendOtp = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true); setError('');
     try {
-      const m = mode === 'signup' ? 'register' : 'login';
-      await api.auth.sendOtp(email.trim(), name.trim(), m);
+      await api.auth.sendOtp(email.trim(), name.trim(), mode === 'signup' ? 'register' : 'login');
       setStep('otp'); setCountdown(60);
       addToast('Verification code sent — check your Gmail inbox.', 'success');
     } catch (err) {
@@ -380,7 +382,7 @@ function LoginPage({ onLogin, mode, onHome, onSwitchMode, inviteToken, requestDo
     e.preventDefault();
     setLoading(true); setError('');
     try {
-      const res = await api.auth.verifyOtp(email.trim(), otp.trim(), name.trim());
+      const res = await api.auth.verifyOtp(email.trim(), otp.trim(), name.trim(), role);
       saveCsrfToken(res.csrfToken);
       if (inviteToken) {
         try { const a = await api.invites.accept(inviteToken); addToast(a.message || 'Invite accepted.', 'success'); }
@@ -391,6 +393,19 @@ function LoginPage({ onLogin, mode, onHome, onSwitchMode, inviteToken, requestDo
       addToast(`Welcome, ${res.user.name}!`, 'success');
     } catch (err) {
       setError(err instanceof ApiError ? err.message : 'Invalid or expired code.');
+    } finally { setLoading(false); }
+  };
+
+  const handleAdminLogin = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setLoading(true); setError('');
+    try {
+      const res = await api.auth.login(email.trim(), adminPassword);
+      saveCsrfToken(res.csrfToken);
+      onLogin(res.user);
+      addToast(`Welcome back, ${res.user.name}!`, 'success');
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : 'Invalid admin credentials.');
     } finally { setLoading(false); }
   };
 
@@ -406,16 +421,21 @@ function LoginPage({ onLogin, mode, onHome, onSwitchMode, inviteToken, requestDo
         <section className="auth-story">
           <div className="eyebrow"><span className="eyebrow-dot" /> YOUR DOCUMENTS. YOUR RULES.</div>
           <h1>{isRegister ? <><span>Create your</span><br /><em>secure account.</em></> : <><span>A quieter way</span><br /><em>to stay in control.</em></>}</h1>
-          <p>{isRegister ? 'Register with your Gmail. We send a one-time code to verify you — no passwords needed.' : 'Enter your Gmail and we\'ll send a 6-digit code. No password required.'}</p>
+          <p>{isRegister ? 'Register with Gmail and choose your role — Owner or Viewer. We verify you with a one-time code.' : 'Enter your Gmail and we\'ll send a 6-digit code. No password required.'}</p>
           <div className="auth-assurance">
             <div className="assurance-seal"><ShieldCheck size={21} strokeWidth={1.5} /></div>
-            <div><strong>One-time codes. Zero stored passwords.</strong><span>Your identity is verified via Gmail OTP every login.</span></div>
+            <div><strong>One-time codes. Role-based access.</strong><span>Owners manage documents. Viewers request access.</span></div>
           </div>
-          <div style={{ marginTop: 20, display: 'flex', flexDirection: 'column', gap: 8 }}>
-            {(['📧 Enter Gmail address', '🔢 Receive 6-digit code', '✅ Verified & signed in'] as const).map((s, i) => (
-              <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 10, fontSize: '0.8rem', color: 'var(--color-text-muted)' }}>
-                <span style={{ width: 22, height: 22, borderRadius: '50%', background: i < (step === 'otp' ? 1 : 0) + 1 ? 'var(--color-accent)' : 'var(--color-surface-3)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '0.65rem', color: '#fff', flexShrink: 0, fontWeight: 700 }}>{i + 1}</span>
-                {s}
+          {/* Role legend */}
+          <div style={{ marginTop: 20, display: 'flex', flexDirection: 'column', gap: 10 }}>
+            {([
+              { icon: '👑', label: 'Owner', desc: 'Upload, manage & share documents' },
+              { icon: '👁️', label: 'Viewer', desc: 'Browse and request document access' },
+              { icon: '🛡️', label: 'Admin', desc: 'Full workspace administration' },
+            ]).map(r => (
+              <div key={r.label} style={{ display: 'flex', alignItems: 'center', gap: 10, fontSize: '0.8rem', color: 'var(--color-text-muted)' }}>
+                <span style={{ fontSize: 16 }}>{r.icon}</span>
+                <span><strong style={{ color: 'var(--color-text)' }}>{r.label}</strong> — {r.desc}</span>
               </div>
             ))}
           </div>
@@ -424,29 +444,52 @@ function LoginPage({ onLogin, mode, onHome, onSwitchMode, inviteToken, requestDo
 
         <section className="auth-form-wrap">
           <div className="auth-card">
-            {/* Tab switcher */}
+            {/* Tabs */}
             <div className="auth-mode-switch" role="tablist">
-              <button className={!isRegister ? 'selected' : ''} type="button" onClick={() => { setError(''); setStep('email'); setOtp(''); onSwitchMode('login'); }}>Sign in</button>
-              <button className={isRegister ? 'selected' : ''} type="button" onClick={() => { setError(''); setStep('email'); setOtp(''); onSwitchMode('signup'); }}>Register</button>
+              <button className={!isRegister ? 'selected' : ''} type="button" onClick={() => { reset(); onSwitchMode('login'); }}>Sign in</button>
+              <button className={isRegister ? 'selected' : ''} type="button" onClick={() => { reset(); onSwitchMode('signup'); }}>Register</button>
             </div>
 
-            {/* ── Step 1: Email input ── */}
-            {step === 'email' && (
+            {/* ── ADMIN PASSWORD LOGIN ── */}
+            {adminMode && !isRegister && (
               <>
                 <div className="auth-card-title">
-                  <span className="form-kicker">{isRegister ? 'CREATE ACCOUNT' : 'GMAIL SIGN-IN'}</span>
-                  <h2>{isRegister ? 'Register with Gmail.' : 'Enter your Gmail.'}</h2>
-                  <p>{isRegister ? 'We\'ll send a 6-digit code to verify your email.' : 'We\'ll send a one-time code — no password needed.'}</p>
+                  <span className="form-kicker">ADMIN ACCESS</span>
+                  <h2>Administrator login.</h2>
+                  <p>Enter the fixed admin credentials to access the full dashboard.</p>
+                </div>
+                <form onSubmit={handleAdminLogin} className="public-form">
+                  <div className="public-field">
+                    <label htmlFor="admin-email">Admin email</label>
+                    <input id="admin-email" type="email" value={email} onChange={e => setEmail(e.target.value)} placeholder="admin@gmail.com" className="public-input" autoComplete="username" required />
+                  </div>
+                  <div className="public-field">
+                    <label htmlFor="admin-pass">Password</label>
+                    <input id="admin-pass" type="password" value={adminPassword} onChange={e => setAdminPassword(e.target.value)} placeholder="Enter admin password" className="public-input" autoComplete="current-password" required />
+                  </div>
+                  {error && <div className="auth-error" role="alert"><XCircle size={15} /><span>{error}</span></div>}
+                  <button type="submit" disabled={loading} className="button button-accent auth-submit">
+                    {loading ? <><RefreshCw size={16} className="animate-spin" /> Signing in…</> : <>Sign in as Admin <ArrowRight size={16} /></>}
+                  </button>
+                </form>
+                <button type="button" className="text-link" style={{ marginTop: 12, fontSize: '0.8rem' }} onClick={() => { setAdminMode(false); setError(''); }}>← Back to Gmail sign-in</button>
+              </>
+            )}
+
+            {/* ── OTP SIGN IN ── */}
+            {!adminMode && !isRegister && step === 'email' && (
+              <>
+                <div className="auth-card-title">
+                  <span className="form-kicker">GMAIL SIGN-IN</span>
+                  <h2>Enter your Gmail.</h2>
+                  <p>We'll send a one-time code — no password needed.</p>
                 </div>
                 <form onSubmit={handleSendOtp} className="public-form">
-                  {isRegister && (
-                    <div className="public-field"><label htmlFor="reg-name">Full name</label><input id="reg-name" type="text" value={name} onChange={e => setName(e.target.value)} placeholder="Your full name" className="public-input" required minLength={2} /></div>
-                  )}
                   <div className="public-field">
-                    <label htmlFor="otp-email">Gmail address</label>
+                    <label htmlFor="signin-email">Gmail address</label>
                     <div style={{ position: 'relative' }}>
                       <span style={{ position: 'absolute', left: 12, top: '50%', transform: 'translateY(-50%)', fontSize: 16 }}>📧</span>
-                      <input id="otp-email" type="email" value={email} onChange={e => setEmail(e.target.value)} placeholder="you@gmail.com" className="public-input" style={{ paddingLeft: 38 }} autoComplete="email" required />
+                      <input id="signin-email" type="email" value={email} onChange={e => setEmail(e.target.value)} placeholder="you@gmail.com" className="public-input" style={{ paddingLeft: 38 }} autoComplete="email" required />
                     </div>
                   </div>
                   {error && <div className="auth-error" role="alert"><XCircle size={15} /><span>{error}</span></div>}
@@ -455,11 +498,17 @@ function LoginPage({ onLogin, mode, onHome, onSwitchMode, inviteToken, requestDo
                   </button>
                 </form>
                 <div className="auth-foot"><Lock size={13} /><span>A 6-digit code valid for 10 minutes will be sent.</span></div>
+                {/* Hidden admin toggle */}
+                <div style={{ textAlign: 'center', marginTop: 16 }}>
+                  <button type="button" onClick={() => { setAdminMode(true); setError(''); }} style={{ background: 'none', border: 'none', color: 'var(--color-text-muted)', fontSize: '0.75rem', cursor: 'pointer', textDecoration: 'underline', opacity: 0.5 }}>
+                    🛡️ Admin login
+                  </button>
+                </div>
               </>
             )}
 
-            {/* ── Step 2: OTP input ── */}
-            {step === 'otp' && (
+            {/* ── OTP VERIFY ── */}
+            {!adminMode && step === 'otp' && (
               <>
                 <div className="auth-card-title">
                   <span className="form-kicker">CHECK YOUR GMAIL</span>
@@ -482,29 +531,70 @@ function LoginPage({ onLogin, mode, onHome, onSwitchMode, inviteToken, requestDo
                     {loading ? <><RefreshCw size={16} className="animate-spin" /> Verifying…</> : <>Verify & sign in <ArrowRight size={16} /></>}
                   </button>
                 </form>
-                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: 12 }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 12 }}>
                   <button type="button" className="text-link" style={{ fontSize: '0.8rem' }} onClick={() => { setStep('email'); setOtp(''); setError(''); }}>← Change email</button>
-                  <button
-                    type="button" className="text-link" style={{ fontSize: '0.8rem' }}
-                    disabled={countdown > 0} onClick={handleSendOtp}
-                  >
+                  <button type="button" className="text-link" style={{ fontSize: '0.8rem' }} disabled={countdown > 0} onClick={handleSendOtp}>
                     {countdown > 0 ? `Resend in ${countdown}s` : 'Resend code'}
                   </button>
                 </div>
                 <div className="auth-foot"><Lock size={13} /><span>Code expires in 10 minutes. Check spam if not received.</span></div>
               </>
             )}
+
+            {/* ── REGISTER ── */}
+            {isRegister && step === 'email' && (
+              <>
+                <div className="auth-card-title">
+                  <span className="form-kicker">CREATE ACCOUNT</span>
+                  <h2>Register with Gmail.</h2>
+                  <p>Choose your role and enter your Gmail. We'll verify with a 6-digit code.</p>
+                </div>
+                <form onSubmit={handleSendOtp} className="public-form">
+                  <div className="public-field">
+                    <label htmlFor="reg-name">Full name</label>
+                    <input id="reg-name" type="text" value={name} onChange={e => setName(e.target.value)} placeholder="Your full name" className="public-input" required minLength={2} />
+                  </div>
+                  <div className="public-field">
+                    <label htmlFor="reg-role">Account type</label>
+                    <select
+                      id="reg-role"
+                      value={role}
+                      onChange={e => setRole(e.target.value as 'owner' | 'viewer')}
+                      className="public-input"
+                      required
+                    >
+                      <option value="viewer">Viewer — browse and request access</option>
+                      <option value="owner">Owner — upload and manage documents</option>
+                    </select>
+                  </div>
+                  <div className="public-field">
+                    <label htmlFor="reg-email">Gmail address</label>
+                    <div style={{ position: 'relative' }}>
+                      <span style={{ position: 'absolute', left: 12, top: '50%', transform: 'translateY(-50%)', fontSize: 16 }}>📧</span>
+                      <input id="reg-email" type="email" value={email} onChange={e => setEmail(e.target.value)} placeholder="you@gmail.com" className="public-input" style={{ paddingLeft: 38 }} autoComplete="email" required />
+                    </div>
+                  </div>
+                  {error && <div className="auth-error" role="alert"><XCircle size={15} /><span>{error}</span></div>}
+                  <button type="submit" disabled={loading} className="button button-accent auth-submit">
+                    {loading ? <><RefreshCw size={16} className="animate-spin" /> Sending code…</> : <>Send verification code <ArrowRight size={16} /></>}
+                  </button>
+                </form>
+                <div className="auth-foot"><Lock size={13} /><span>A 6-digit code valid for 10 minutes will be sent to your Gmail.</span></div>
+              </>
+            )}
           </div>
           <button type="button" className="back-home" onClick={onHome}>← Back to TrustVault</button>
         </section>
       </main>
-      <footer className="auth-footer"><span>TRUSTVAULT / SECURE ACCESS</span><span>GMAIL OTP · ENCRYPTED · VERIFIED</span></footer>
+      <footer className="auth-footer"><span>TRUSTVAULT / SECURE ACCESS</span><span>GMAIL OTP · ROLE-BASED · ENCRYPTED</span></footer>
     </div>
   );
 }
+
 // ============================================================
 // Sidebar + Layout
 // ============================================================
+
 
 
 type View = 'dashboard' | 'documents' | 'upload' | 'doc-detail' | 'users' | 'audit' | 'access-requests' | 'my-requests' | 'settings';

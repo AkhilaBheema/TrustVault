@@ -76,8 +76,8 @@ export const api = {
       request<{ user: User; csrfToken: string }>('POST', '/auth/login', { email, password }),
     sendOtp: (email: string, name?: string, mode: 'register' | 'login' = 'login') =>
       request<{ message: string }>('POST', '/auth/send-otp', { email, name, mode }),
-    verifyOtp: (email: string, otp: string, name?: string) =>
-      request<{ user: User; csrfToken: string }>('POST', '/auth/verify-otp', { email, otp, name }),
+    verifyOtp: (email: string, otp: string, name?: string, role?: 'owner' | 'viewer') =>
+      request<{ user: User; csrfToken: string }>('POST', '/auth/verify-otp', { email, otp, name, role }),
     logout: () => request<void>('POST', '/auth/logout'),
     me: () => request<{ user: User; csrfToken: string }>('GET', '/auth/me'),
   },

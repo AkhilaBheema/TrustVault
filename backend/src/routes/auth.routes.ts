@@ -88,11 +88,12 @@ export async function authRoutes(app: FastifyInstance) {
     const parsed = z.object({
       email: z.string().trim().email(),
       otp: z.string().length(6),
-      name: z.string().trim().min(2).max(120).optional().default(''),
+      name: z.string().trim().min(2).max(120).optional().default('User'),
+      role: z.enum(['owner', 'viewer']).optional().default('viewer'),
     }).safeParse(request.body);
     if (!parsed.success) return reply.status(400).send({ error: 'Bad Request', message: 'Invalid input.' });
 
-    const { email, otp, name } = parsed.data;
+    const { email, otp, name, role } = parsed.data;
     const lowerEmail = email.toLowerCase();
     const entry = otpStore.get(lowerEmail);
 
@@ -107,15 +108,14 @@ export async function authRoutes(app: FastifyInstance) {
     );
 
     if (userRow.rows.length === 0) {
-      // Auto-register as viewer under first org
       const org = await pool.query<{ id: string }>('SELECT id FROM organizations LIMIT 1');
       if (org.rows.length === 0) return reply.status(500).send({ error: 'ServerError', message: 'No organization found.' });
       const orgId = org.rows[0].id;
       const displayName = name || entry.name || lowerEmail.split('@')[0];
       const dummyHash = await CryptoService.hashPassword(CryptoService.generateRandomToken(32));
       await pool.query(
-        `INSERT INTO users (organization_id, email, password_hash, name, role) VALUES ($1, $2, $3, $4, 'viewer')`,
-        [orgId, lowerEmail, dummyHash, displayName]
+        `INSERT INTO users (organization_id, email, password_hash, name, role) VALUES ($1, $2, $3, $4, $5)`,
+        [orgId, lowerEmail, dummyHash, displayName, role]
       );
       userRow = await pool.query<{ id: string; organization_id: string; email: string; name: string; role: 'admin'|'owner'|'viewer'; is_disabled: boolean }>(
         'SELECT id, organization_id, email, name, role, is_disabled FROM users WHERE LOWER(email) = $1', [lowerEmail]
@@ -140,6 +140,7 @@ export async function authRoutes(app: FastifyInstance) {
       csrfToken,
     });
   });
+
 
   // ── 4. Logout ────────────────────────────────────────────────
   app.post('/api/auth/logout', { preHandler: [authenticate, verifyCsrf] }, async (request, reply) => {
