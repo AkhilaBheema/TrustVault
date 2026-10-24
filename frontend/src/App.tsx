@@ -347,11 +347,10 @@ function LoginPage({ onLogin, mode, onHome, onSwitchMode, inviteToken, requestDo
   requestDocumentId?: string | null;
 }) {
   // OTP flow state
-  const [step, setStep] = useState<'email' | 'otp' | 'password'>('email');
+  const [step, setStep] = useState<'email' | 'otp'>('email');
   const [email, setEmail] = useState('');
   const [name, setName] = useState('');
   const [otp, setOtp] = useState('');
-  const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [countdown, setCountdown] = useState(0);
@@ -395,19 +394,6 @@ function LoginPage({ onLogin, mode, onHome, onSwitchMode, inviteToken, requestDo
     } finally { setLoading(false); }
   };
 
-  const handlePasswordLogin = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setLoading(true); setError('');
-    try {
-      const res = await api.auth.login(email.trim(), password);
-      saveCsrfToken(res.csrfToken);
-      onLogin(res.user);
-      addToast(`Signed in as ${res.user.name}`, 'success');
-    } catch (err) {
-      setError(err instanceof ApiError ? err.message : 'Invalid credentials.');
-    } finally { setLoading(false); }
-  };
-
   const isRegister = mode === 'signup';
 
   return (
@@ -440,24 +426,9 @@ function LoginPage({ onLogin, mode, onHome, onSwitchMode, inviteToken, requestDo
           <div className="auth-card">
             {/* Tab switcher */}
             <div className="auth-mode-switch" role="tablist">
-              <button className={!isRegister && step !== 'password' ? 'selected' : ''} type="button" onClick={() => { setError(''); setStep('email'); setOtp(''); onSwitchMode('login'); }}>Sign in</button>
+              <button className={!isRegister ? 'selected' : ''} type="button" onClick={() => { setError(''); setStep('email'); setOtp(''); onSwitchMode('login'); }}>Sign in</button>
               <button className={isRegister ? 'selected' : ''} type="button" onClick={() => { setError(''); setStep('email'); setOtp(''); onSwitchMode('signup'); }}>Register</button>
-              <button className={step === 'password' ? 'selected' : ''} type="button" onClick={() => { setError(''); setStep('password'); }} title="Admin password login">Password</button>
             </div>
-
-            {/* ── Password login (admin fallback) ── */}
-            {step === 'password' && (
-              <>
-                <div className="auth-card-title"><span className="form-kicker">ADMIN ACCESS</span><h2>Password sign-in</h2><p>For accounts created by your administrator with a set password.</p></div>
-                <form onSubmit={handlePasswordLogin} className="public-form">
-                  <div className="public-field"><label htmlFor="pw-email">Work email</label><input id="pw-email" type="email" value={email} onChange={e => setEmail(e.target.value)} placeholder="you@company.com" className="public-input" autoComplete="username" required /></div>
-                  <div className="public-field"><label htmlFor="pw-pass">Password</label><input id="pw-pass" type="password" value={password} onChange={e => setPassword(e.target.value)} placeholder="Enter your password" className="public-input" autoComplete="current-password" required /></div>
-                  {error && <div className="auth-error" role="alert"><XCircle size={15} /><span>{error}</span></div>}
-                  <button type="submit" disabled={loading} className="button button-accent auth-submit">{loading ? <><RefreshCw size={16} className="animate-spin" /> Checking…</> : <>Continue securely <ArrowRight size={16} /></>}</button>
-                </form>
-                <div className="auth-foot"><Lock size={13} /><span>Sessions are private, scoped, and immediately revocable.</span></div>
-              </>
-            )}
 
             {/* ── Step 1: Email input ── */}
             {step === 'email' && (
