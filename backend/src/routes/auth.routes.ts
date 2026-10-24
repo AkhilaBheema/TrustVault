@@ -13,7 +13,7 @@ function cookieOpts(expiresAt: Date) {
     path: '/',
     httpOnly: true,
     secure: process.env.NODE_ENV === 'production',
-    sameSite: (process.env.COOKIE_SAME_SITE === 'none' ? 'none' : 'strict') as 'strict' | 'none',
+    sameSite: (process.env.NODE_ENV === 'production' ? 'none' : 'strict') as 'strict' | 'none',
     expires: expiresAt,
   };
 }
@@ -43,7 +43,12 @@ export async function authRoutes(app: FastifyInstance) {
     if (sessionToken && request.user) {
       await AuthService.logout(sessionToken, request.user, request.ip, request.headers['user-agent'] || null);
     }
-    reply.clearCookie(SESSION_COOKIE_NAME, { path: '/', httpOnly: true, secure: process.env.NODE_ENV === 'production', sameSite: 'strict' });
+    reply.clearCookie(SESSION_COOKIE_NAME, {
+      path: '/',
+      httpOnly: true,
+      secure: process.env.NODE_ENV === 'production',
+      sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'strict',
+    });
     return reply.status(200).send({ status: 'success', message: 'Logged out successfully.' });
   });
 

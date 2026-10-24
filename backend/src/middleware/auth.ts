@@ -28,7 +28,7 @@ export async function authenticate(request: FastifyRequest, reply: FastifyReply)
       path: '/',
       httpOnly: true,
       secure: process.env.NODE_ENV === 'production',
-      sameSite: process.env.COOKIE_SAME_SITE === 'none' ? 'none' : 'strict',
+      sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'strict',
     });
 
     return reply.status(401).send({
