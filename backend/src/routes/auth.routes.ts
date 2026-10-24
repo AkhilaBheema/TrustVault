@@ -76,8 +76,13 @@ export async function authRoutes(app: FastifyInstance) {
 
     try {
       await sendOtpEmail(lowerEmail, otp, name || '');
-    } catch (e) {
-      console.error('[OTP] Email send failed:', e);
+    } catch (error) {
+      otpStore.delete(lowerEmail);
+      console.error('[OTP] Email send failed:', error);
+      return reply.status(503).send({
+        error: 'Service Unavailable',
+        message: 'Verification email could not be sent. Please try again later.',
+      });
     }
 
     return reply.status(200).send({ message: 'Verification code sent. Check your Gmail inbox.' });

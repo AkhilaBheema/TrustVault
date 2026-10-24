@@ -11,6 +11,9 @@ function getTransport() {
   return nodemailer.createTransport({
     service: 'gmail',
     auth: { user: process.env.GMAIL_USER, pass: process.env.GMAIL_APP_PASSWORD },
+    connectionTimeout: 10_000,
+    greetingTimeout: 10_000,
+    socketTimeout: 15_000,
   });
 }
 
@@ -32,6 +35,9 @@ export async function sendOtpEmail(to: string, otp: string, name: string) {
     </div>`;
 
   if (!transport) {
+    if (process.env.NODE_ENV === 'production') {
+      throw new Error('Gmail delivery is not configured.');
+    }
     console.log(`[EMAIL-DEV] OTP for ${to}: ${otp}`);
     return;
   }
