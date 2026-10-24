@@ -1,9 +1,17 @@
 import nodemailer from 'nodemailer';
 
+const EMAIL_TIMEOUT_MS = 10_000;
+
 function isDevMode() {
   const user = process.env.GMAIL_USER?.trim() || '';
   const pass = process.env.GMAIL_APP_PASSWORD?.replace(/\s/g, '') || '';
   return !user || !pass || user.includes('your-email') || pass.includes('your-16');
+}
+
+function getResendConfig() {
+  const apiKey = process.env.RESEND_API_KEY?.trim() || '';
+  const from = process.env.EMAIL_FROM?.trim() || '';
+  return apiKey && from ? { apiKey, from } : null;
 }
 
 function getTransport() {
@@ -22,8 +30,36 @@ function getTransport() {
   });
 }
 
+async function sendWithResend(
+  to: string,
+  subject: string,
+  html: string,
+  apiKey: string,
+  from: string
+) {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), EMAIL_TIMEOUT_MS);
+  try {
+    const response = await fetch('https://api.resend.com/emails', {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ from, to: [to], subject, html }),
+      signal: controller.signal,
+    });
+    if (!response.ok) {
+      const details = await response.text();
+      throw new Error(`Resend returned ${response.status}: ${details.slice(0, 300)}`);
+    }
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
 export async function sendOtpEmail(to: string, otp: string, name: string) {
-  const transport = getTransport();
+  const resend = getResendConfig();
   const html = `
     <div style="font-family:sans-serif;max-width:480px;margin:auto;padding:32px;background:#0f1a16;color:#e2e8f0;border-radius:12px">
       <div style="text-align:center;margin-bottom:24px">
@@ -39,9 +75,16 @@ export async function sendOtpEmail(to: string, otp: string, name: string) {
       <p style="color:#64748b;font-size:12px">If you didn't request this, ignore this email. Never share this code.</p>
     </div>`;
 
+  const subject = `${otp} — Your TrustVault verification code`;
+  if (resend) {
+    await sendWithResend(to, subject, html, resend.apiKey, resend.from);
+    return;
+  }
+
+  const transport = getTransport();
   if (!transport) {
     if (process.env.NODE_ENV === 'production') {
-      throw new Error('Gmail delivery is not configured.');
+    throw new Error('Email delivery is not configured. Set RESEND_API_KEY and EMAIL_FROM.');
     }
     console.log(`[EMAIL-DEV] OTP for ${to}: ${otp}`);
     return;
@@ -49,7 +92,7 @@ export async function sendOtpEmail(to: string, otp: string, name: string) {
   await transport.sendMail({
     from: `"TrustVault" <${process.env.GMAIL_USER?.trim()}>`,
     to,
-    subject: `${otp} — Your TrustVault verification code`,
+    subject,
     html,
   });
 }
