@@ -1,16 +1,21 @@
 import nodemailer from 'nodemailer';
 
 function isDevMode() {
-  const user = process.env.GMAIL_USER || '';
-  const pass = process.env.GMAIL_APP_PASSWORD || '';
+  const user = process.env.GMAIL_USER?.trim() || '';
+  const pass = process.env.GMAIL_APP_PASSWORD?.replace(/\s/g, '') || '';
   return !user || !pass || user.includes('your-email') || pass.includes('your-16');
 }
 
 function getTransport() {
   if (isDevMode()) return null;
   return nodemailer.createTransport({
-    service: 'gmail',
-    auth: { user: process.env.GMAIL_USER, pass: process.env.GMAIL_APP_PASSWORD },
+    host: 'smtp.gmail.com',
+    port: 465,
+    secure: true,
+    auth: {
+      user: process.env.GMAIL_USER?.trim(),
+      pass: process.env.GMAIL_APP_PASSWORD?.replace(/\s/g, ''),
+    },
     connectionTimeout: 10_000,
     greetingTimeout: 10_000,
     socketTimeout: 15_000,
@@ -42,7 +47,7 @@ export async function sendOtpEmail(to: string, otp: string, name: string) {
     return;
   }
   await transport.sendMail({
-    from: `"TrustVault" <${process.env.GMAIL_USER}>`,
+    from: `"TrustVault" <${process.env.GMAIL_USER?.trim()}>`,
     to,
     subject: `${otp} — Your TrustVault verification code`,
     html,
